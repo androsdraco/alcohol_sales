@@ -3,24 +3,24 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import ttest_ind, t
-from datetime import datetime, timedelta
+from scipy.stats import ttest_ind, mannwhitneyu, pointbiserialr, skew, kurtosis, sem, t, norm
 import warnings
 import re
 import os
+from datetime import datetime
 warnings.filterwarnings('ignore')
 
 # Configuración de página
 st.set_page_config(
-    page_title="Análisis de Ventas de Alcohol",
+    page_title="Análisis Estadístico de Ventas",
     layout="wide"
 )
 
-# Título
-st.title("Panel de Análisis de Ventas de Alcohol")
+# Título principal
+st.title("Análisis Estadístico Completo de Ventas")
 
-# Sección de configuración en la parte superior
-st.header("Configuración de Datos")
+# ==================== CONFIGURACIÓN ====================
+st.header("Configuración del Análisis")
 
 # Cargar archivo desde ubicación fija
 file_path = r"CSV/Alcohol sales.csv"
@@ -33,84 +33,70 @@ if not os.path.exists(file_path):
 
 st.write(f"Archivo cargado: {file_path}")
 
-# Configuración de campaña
-st.header("Configuración de Campaña")
+# Fecha de inicio de campaña
+campaign_date = st.date_input(
+    "Fecha de Inicio de Campaña",
+    value=pd.Timestamp('2023-01-10'),
+    help="Selecciona la fecha cuando comenzó la campaña"
+)
 
-col3, col4, col5 = st.columns(3)
-
-with col3:
-    campaign_date = st.date_input(
-        "Fecha de Inicio de Campaña",
-        value=pd.Timestamp('2023-01-10'),
-        help="Selecciona la fecha cuando comenzó tu campaña"
-    )
-
-with col4:
-    analysis_end_date = st.date_input(
-        "Fecha Final de Análisis",
-        value=pd.Timestamp('2023-03-10'),
-        help="Selecciona la fecha final para tu análisis"
-    )
-
-with col5:
-    period_option = st.selectbox(
-        "Longitud del Periodo",
-        ["1 día", "1 semana"],
-        help="Selecciona la longitud del periodo para comparación"
-    )
-
-# Convertir opción de periodo a días
-period_days = {"1 día": 1, "1 semana": 7}
-comparison_days = period_days[period_option]
-
-# Convertir a Timestamps
+# Convertir a Timestamp
 campaign_date = pd.Timestamp(campaign_date)
-analysis_end_date = pd.Timestamp(analysis_end_date)
 
-# Función para limpiar datos de ventas
-def clean_sales_data(df):
-    if df is None:
-        return None
+# ==================== FUNCIONES AUXILIARES ====================
+def clean_sales_value(value):
+    """Limpia y convierte valores de venta a float"""
+    if pd.isna(value):
+        return np.nan
     
-    df = df.copy()
+    value_str = str(value)
+    value_str = re.sub(r'[$,€£¥\s]', '', value_str)
     
-    if 'sales' not in df.columns:
-        return None
-    
-    def clean_sale_value(value):
-        if pd.isna(value):
-            return np.nan
-        
-        value_str = str(value)
-        value_str = re.sub(r'[$,€£¥\s]', '', value_str)
-        
-        if ',' in value_str and '.' in value_str:
+    if ',' in value_str and '.' in value_str:
+        value_str = value_str.replace(',', '')
+    elif ',' in value_str and '.' not in value_str:
+        parts = value_str.split(',')
+        if len(parts) == 2 and len(parts[1]) <= 2:
+            value_str = value_str.replace(',', '.')
+        else:
             value_str = value_str.replace(',', '')
-        elif ',' in value_str and '.' not in value_str:
-            parts = value_str.split(',')
-            if len(parts) == 2 and len(parts[1]) <= 2:
-                value_str = value_str.replace(',', '.')
-            else:
-                value_str = value_str.replace(',', '')
-        
-        try:
-            return float(value_str)
-        except:
-            return np.nan
     
-    df['sales'] = df['sales'].apply(clean_sale_value)
-    df = df.dropna(subset=['sales'])
-    df = df[df['sales'] >= 0]
-    
-    return df
-
-# Función para cargar datos
-def load_data():
     try:
-        # Leer archivo desde ubicación fija
+        return float(value_str)
+    except:
+        return np.nan
+
+def confidence_interval(data, confidence=0.95):
+    """Calcula intervalo de confianza para la media"""
+    n = len(data)
+    if n < 2:
+        return np.mean(data), np.nan, np.nan
+    
+    mean = np.mean(data)
+    std_err = sem(data)
+    h = std_err * t.ppf((1 + confidence) / 2, n - 1)
+    return mean, mean - h, mean + h
+
+def interpret_cohens_d(d):
+    """Interpreta el tamaño del efecto de Cohen's d"""
+    if abs(d) < 0.2:
+        return "Efecto muy pequeño"
+    elif abs(d) < 0.5:
+        return "Efecto pequeño"
+    elif abs(d) < 0.8:
+        return "Efecto moderado"
+    else:
+        return "Efecto grande"
+
+# ==================== CARGA Y PROCESAMIENTO DE DATOS ====================
+@st.cache_data
+def load_and_process_data(file_path, campaign_date):
+    """Carga y procesa los datos"""
+    try:
+        # Leer archivo
         df = pd.read_csv(file_path)
         
-        # Manejar columna de fecha
+        # Buscar columna de fecha
         date_cols = ['date', 'Date', 'DATE', 'fecha', 'Fecha']
         for date_col in date_cols:
             if date_col in df.columns:
@@ -130,9 +116,9 @@ def load_data():
                 break
         
         # Limpiar datos de ventas
-        df = clean_sales_data(df)
-        if df is None:
-            return None
+        df['sales'] = df['sales'].apply(clean_sales_value)
+        df = df.dropna(subset=['sales'])
+        df = df[df['sales'] >= 0]
         
         # Buscar columna de marca
         brand_cols = ['brand', 'Brand', 'marca', 'Marca', 'producto', 'Producto']
@@ -144,11 +130,16 @@ def load_data():
         # Eliminar filas con fechas inválidas
         df = df.dropna(subset=['date'])
         
-        # Filtrar datos hasta la fecha final de análisis
-        df = df[df['date'] <= analysis_end_date]
+        # Crear variable Campaign (Before/After)
+        df['Campaign'] = 'Before'
+        df.loc[df['date'] >= campaign_date, 'Campaign'] = 'After'
         
-        # Ordenar por fecha
-        df = df.sort_values('date').reset_index(drop=True)
+        # Crear variables temporales adicionales
+        df['year'] = df['date'].dt.year
+        df['month'] = df['date'].dt.month
+        df['day'] = df['date'].dt.day
+        df['day_of_week'] = df['date'].dt.day_name()
+        df['is_weekend'] = df['date'].dt.dayofweek >= 5
         
         return df
         
@@ -156,445 +147,422 @@ def load_data():
         st.error(f"Error cargando archivo: {str(e)}")
         return None
 
-# Cargar los datos
-df = load_data()
+# Cargar datos
+with st.spinner("Cargando y procesando datos..."):
+    df = load_and_process_data(file_path, campaign_date)
 
 if df is None:
     st.stop()
 
-# Mostrar información básica del archivo
-st.write(f"Total de registros: {len(df)}")
-st.write(f"Rango de fechas: {df['date'].min().date()} al {df['date'].max().date()}")
-
-# Análisis Exploratorio de Datos (EDA)
+# ==================== INFORMACIÓN DEL DATASET ====================
 st.markdown("---")
-st.header("Análisis Exploratorio de Datos")
+st.header("Información del Dataset")
 
-# Métricas básicas
-col1, col2, col3, col4 = st.columns(4)
+col_info1, col_info2, col_info3 = st.columns(3)
 
-with col1:
-    total_sales = df['sales'].sum()
-    st.metric("Ventas Totales", f"${total_sales:,.0f}")
+with col_info1:
+    st.metric("Forma del Dataset", f"{df.shape[0]} filas × {df.shape[1]} columnas")
+    st.metric("Registros totales", f"{len(df):,}")
+    st.metric("Marcas únicas", f"{df['brand'].nunique()}")
 
-with col2:
-    avg_sale = df['sales'].mean()
-    st.metric("Venta Promedio", f"${avg_sale:.2f}")
+with col_info2:
+    st.metric("Rango de fechas", 
+              f"{df['date'].min().strftime('%d/%m/%Y')} a {df['date'].max().strftime('%d/%m/%Y')}")
+    st.metric("Días totales", f"{(df['date'].max() - df['date'].min()).days}")
+    st.metric("Fechas únicas", f"{df['date'].nunique()}")
 
-with col3:
-    transaction_count = len(df)
-    st.metric("Total Transacciones", f"{transaction_count:,}")
+with col_info3:
+    # Estadísticas de ventas
+    st.metric("Ventas totales", f"${df['sales'].sum():,.0f}")
+    st.metric("Venta promedio", f"${df['sales'].mean():.2f}")
+    st.metric("Mediana de ventas", f"${df['sales'].median():.2f}")
 
-with col4:
-    unique_products = df['brand'].nunique()
-    st.metric("Productos Únicos", f"{unique_products}")
+# Estadísticas descriptivas detalladas
+st.subheader("Estadísticas Descriptivas de Ventas")
 
-# Gráficos EDA
-col5, col6 = st.columns(2)
+col_stats1, col_stats2 = st.columns(2)
 
-with col5:
-    # Distribución de ventas
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.hist(df['sales'], bins=50, alpha=0.7, color='steelblue', edgecolor='black')
-    ax.set_xlabel('Monto de Venta ($)')
-    ax.set_ylabel('Frecuencia')
-    ax.set_title('Distribución de Montos de Venta')
-    ax.grid(True, alpha=0.3)
-    st.pyplot(fig)
-
-with col6:
-    # Ventas por día de la semana
-    df['dia_semana'] = df['date'].dt.day_name()
-    dias_orden = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    df['dia_semana'] = pd.Categorical(df['dia_semana'], categories=dias_orden, ordered=True)
+with col_stats1:
+    st.write("**Medidas de tendencia central:**")
+    stats_summary = df['sales'].describe()
     
-    ventas_por_dia = df.groupby('dia_semana')['sales'].mean().reindex(dias_orden)
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    bars = ax.bar(range(len(ventas_por_dia)), ventas_por_dia.values, alpha=0.7, color='forestgreen')
-    ax.set_xlabel('Día de la Semana')
-    ax.set_ylabel('Venta Promedio ($)')
-    ax.set_title('Venta Promedio por Día de la Semana')
-    ax.set_xticks(range(len(ventas_por_dia)))
-    ax.set_xticklabels(['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'])
-    ax.grid(True, alpha=0.3, axis='y')
-    
-    # Añadir valores en las barras
-    for bar, val in zip(bars, ventas_por_dia.values):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5, 
-                f'${val:.0f}', ha='center', va='bottom')
-    
-    st.pyplot(fig)
-
-# Top productos
-st.subheader("Top 10 Productos por Ventas")
-
-top_products = df.groupby('brand')['sales'].sum().sort_values(ascending=False).head(10)
-
-fig, ax = plt.subplots(figsize=(12, 6))
-bars = ax.barh(range(len(top_products)), top_products.values, alpha=0.7, color='darkorange')
-ax.set_yticks(range(len(top_products)))
-ax.set_yticklabels(top_products.index)
-ax.set_xlabel('Ventas Totales ($)')
-ax.set_title('Top 10 Productos por Ventas Totales')
-ax.grid(True, alpha=0.3, axis='x')
-
-# Añadir valores en las barras
-for i, (bar, val) in enumerate(zip(bars, top_products.values)):
-    ax.text(val + max(top_products.values)*0.01, bar.get_y() + bar.get_height()/2, 
-            f'${val:,.0f}', va='center')
-
-st.pyplot(fig)
-
-# Función para crear periodos iguales antes y después
-def create_periods(df, campaign_date, end_date, period_days):
-    # Calcular duración de la campaña
-    campaign_duration = (end_date - campaign_date).days + 1
-    
-    # Calcular número máximo de periodos iguales (máximo 6)
-    max_periods = min(6, campaign_duration // period_days)
-    
-    periods = []
-    
-    # Crear periodos de campaña
-    for i in range(max_periods):
-        start_date = campaign_date + timedelta(days=i*period_days)
-        end_period = min(start_date + timedelta(days=period_days-1), end_date)
-        
-        label = f"Campaña {i+1}"
-        if period_days == 1:
-            label += f": {start_date.strftime('%d/%m')}"
+    for stat, value in stats_summary.items():
+        if stat == 'count':
+            st.write(f"- {stat.capitalize()}: {value:,.0f}")
         else:
-            label += f": {start_date.strftime('%d/%m')}-{end_period.strftime('%d/%m')}"
-        
-        periods.append({
-            'period': f'despues_{i+1}',
-            'start': start_date,
-            'end': end_period,
-            'label': label,
-            'campaign': 'despues'
-        })
+            st.write(f"- {stat.capitalize()}: ${value:,.2f}")
     
-    # Crear periodos antes (mismo número que periodos después)
-    for i in range(max_periods):
-        end_date_before = campaign_date - timedelta(days=1)
-        start_date = end_date_before - timedelta(days=(i+1)*period_days - 1)
-        
-        if start_date < df['date'].min():
-            break
-            
-        label = f"Antes {i+1}"
-        if period_days == 1:
-            label += f": {start_date.strftime('%d/%m')}"
-        else:
-            end_period = start_date + timedelta(days=period_days-1)
-            label += f": {start_date.strftime('%d/%m')}-{end_period.strftime('%d/%m')}"
-        
-        periods.append({
-            'period': f'antes_{i+1}',
-            'start': start_date,
-            'end': start_date + timedelta(days=period_days-1),
-            'label': label,
-            'campaign': 'antes'
-        })
-    
-    # Ordenar cronológicamente
-    periods.sort(key=lambda x: x['start'])
-    
-    # Asignar periodos a los datos
-    df['periodo'] = 'no incluido'
-    df['etiqueta_periodo'] = 'no incluido'
-    df['grupo'] = 'no incluido'
-    
-    for period in periods:
-        mask = (df['date'] >= period['start']) & (df['date'] <= period['end'])
-        df.loc[mask, 'periodo'] = period['period']
-        df.loc[mask, 'etiqueta_periodo'] = period['label']
-        df.loc[mask, 'grupo'] = period['campaign']
-    
-    return df, periods, max_periods
+    # Medidas de forma
+    st.write(f"\n**Medidas de forma:**")
+    st.write(f"- Asimetría (skewness): {skew(df['sales'].dropna()):.4f}")
+    st.write(f"- Curtosis (kurtosis): {kurtosis(df['sales'].dropna()):.4f}")
 
-# Crear periodos
-df, periods, num_periods = create_periods(df, campaign_date, analysis_end_date, comparison_days)
+with col_stats2:
+    # Cálculo de cuartiles y outliers
+    Q1 = df['sales'].quantile(0.25)
+    Q3 = df['sales'].quantile(0.75)
+    IQR = Q3 - Q1
+    
+    st.write("**Análisis de Cuartiles:**")
+    st.write(f"- Q1 (25%): ${Q1:.2f}")
+    st.write(f"- Q3 (75%): ${Q3:.2f}")
+    st.write(f"- Rango Intercuartílico (IQR): ${IQR:.2f}")
+    
+    # Límites para outliers
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    outliers = df[(df['sales'] < lower_bound) | (df['sales'] > upper_bound)]
+    
+    st.write(f"\n**Detección de Outliers (método IQR):**")
+    st.write(f"- Límite inferior: ${lower_bound:.2f}")
+    st.write(f"- Límite superior: ${upper_bound:.2f}")
+    st.write(f"- Outliers potenciales: {len(outliers)} registros ({len(outliers)/len(df)*100:.1f}%)")
 
-# Análisis comparativo
+# ==================== ANÁLISIS TEMPORAL ====================
 st.markdown("---")
-st.header("Análisis Comparativo: Antes vs Después")
+st.header("Análisis Temporal de Ventas")
 
-st.write(f"Método de comparación: {num_periods} periodos de {period_option} antes y {num_periods} periodos de {period_option} después")
+col_time1, col_time2 = st.columns(2)
 
-# Datos para análisis comparativo
-df_periodos = df[df['grupo'] != 'no incluido'].copy()
+with col_time1:
+    # Estadísticas anuales
+    st.subheader("Estadísticas por Año")
+    yearly_stats = df.groupby('year')['sales'].agg(['count', 'sum', 'mean', 'median']).round(2)
+    st.dataframe(yearly_stats.style.format({
+        'count': '{:,.0f}',
+        'sum': '${:,.2f}',
+        'mean': '${:.2f}',
+        'median': '${:.2f}'
+    }))
 
-if len(df_periodos) > 0:
-    # Calcular métricas por periodo
-    period_metrics = df_periodos.groupby(['etiqueta_periodo', 'grupo']).agg({
-        'sales': ['sum', 'mean', 'count']
-    }).round(2).reset_index()
+with col_time2:
+    # Patrones mensuales
+    st.subheader("Patrones Mensuales")
+    monthly_avg = df.groupby('month')['sales'].mean().sort_values(ascending=False)
     
-    period_metrics.columns = ['Periodo', 'Grupo', 'Ventas_Totales', 'Venta_Promedio', 'Transacciones']
+    fig_month, ax_month = plt.subplots(figsize=(10, 5))
+    bars = ax_month.bar(range(1, 13), monthly_avg.sort_index().values)
+    ax_month.set_xlabel('Mes')
+    ax_month.set_ylabel('Venta Promedio ($)')
+    ax_month.set_title('Venta Promedio por Mes')
+    ax_month.set_xticks(range(1, 13))
+    ax_month.grid(True, alpha=0.3, axis='y')
     
-    # Ordenar periodos
-    orden_periodos = []
-    for i in range(num_periods, 0, -1):
-        orden_periodos.append(f'Antes {i}')
-    for i in range(1, num_periods + 1):
-        orden_periodos.append(f'Campaña {i}')
+    # Añadir valores
+    for bar, val in zip(bars, monthly_avg.sort_index().values):
+        ax_month.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(monthly_avg.values)*0.01,
+                     f'${val:.0f}', ha='center', va='bottom', fontsize=9)
     
-    period_metrics['Orden'] = pd.Categorical(
-        period_metrics['Periodo'].str.extract(r'(\w+) (\d+)')[0] + ' ' + 
-        period_metrics['Periodo'].str.extract(r'(\w+) (\d+)')[1],
-        categories=orden_periodos,
-        ordered=True
-    )
-    period_metrics = period_metrics.sort_values('Orden')
-    
-    # Gráfico comparativo
-    col7, col8 = st.columns(2)
-    
-    with col7:
-        fig, ax = plt.subplots(figsize=(12, 6))
-        x = np.arange(len(period_metrics))
-        colors = ['steelblue' if g == 'antes' else 'forestgreen' for g in period_metrics['Grupo']]
+    st.pyplot(fig_month)
+
+# Patrones por día de la semana
+st.subheader("Patrones por Día de la Semana")
+dow_avg = df.groupby('day_of_week')['sales'].mean()
+days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+dow_avg = dow_avg.reindex(days_order)
+
+fig_dow, ax_dow = plt.subplots(figsize=(10, 5))
+bars = ax_dow.bar(range(len(dow_avg)), dow_avg.values)
+ax_dow.set_xlabel('Día de la Semana')
+ax_dow.set_ylabel('Venta Promedio ($)')
+ax_dow.set_title('Venta Promedio por Día de la Semana')
+ax_dow.set_xticks(range(len(dow_avg)))
+ax_dow.set_xticklabels(['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'])
+ax_dow.grid(True, alpha=0.3, axis='y')
+
+# Añadir valores
+for bar, val in zip(bars, dow_avg.values):
+    ax_dow.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(dow_avg.values)*0.01,
+               f'${val:.0f}', ha='center', va='bottom', fontsize=9)
+
+st.pyplot(fig_dow)
+
+# ==================== ANÁLISIS DE HIPÓTESIS MULTIVARIADO ====================
+st.markdown("---")
+st.header("Pruebas de Hipótesis Multivariadas")
+
+st.subheader("Comparación de Múltiples Variables: Antes vs Después")
+
+# Identificar columnas numéricas
+Num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+# Remover columnas que no queremos analizar
+exclude_cols = ['year', 'month', 'day', 'is_weekend']
+Num_cols = [col for col in Num_cols if col not in exclude_cols]
+
+if 'sales' not in Num_cols and 'sales' in df.columns:
+    Num_cols.insert(0, 'sales')
+
+st.write(f"Variables numéricas identificadas: {', '.join(Num_cols)}")
+st.write(f"Total de variables a analizar: {len(Num_cols)}")
+
+# Realizar pruebas de hipótesis para cada columna
+test_results = []
+
+with st.spinner("Realizando pruebas de hipótesis..."):
+    for col in Num_cols:
+        # Skip si no es columna numérica
+        if col == 'Campaign' or not pd.api.types.is_numeric_dtype(df[col]):
+            continue
         
-        bars = ax.bar(x, period_metrics['Ventas_Totales'], color=colors, alpha=0.7, width=0.6)
-        ax.set_xlabel('Periodo')
-        ax.set_ylabel('Ventas Totales ($)')
-        ax.set_title('Comparación de Ventas por Periodo')
-        ax.set_xticks(x)
-        ax.set_xticklabels(period_metrics['Periodo'], rotation=45, ha='right')
-        ax.grid(True, alpha=0.3, axis='y')
+        # Separar datos por Campaign
+        before_data = df[df['Campaign'] == 'Before'][col].dropna()
+        after_data = df[df['Campaign'] == 'After'][col].dropna()
         
-        # Línea divisoria
-        ax.axvline(x=num_periods-0.5, color='red', linestyle='--', alpha=0.5, linewidth=2)
-        
-        # Etiquetas
-        for bar, val in zip(bars, period_metrics['Ventas_Totales']):
-            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(period_metrics['Ventas_Totales'])*0.01,
-                   f'${val:,.0f}', ha='center', va='bottom', fontsize=9)
-        
-        st.pyplot(fig)
-    
-    with col8:
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Separar datos antes y después
-        antes_data = period_metrics[period_metrics['Grupo'] == 'antes']['Venta_Promedio'].values
-        despues_data = period_metrics[period_metrics['Grupo'] == 'despues']['Venta_Promedio'].values
-        
-        x = np.arange(len(antes_data))
-        width = 0.35
-        
-        bars1 = ax.bar(x - width/2, antes_data, width, label='Antes', alpha=0.7, color='steelblue')
-        bars2 = ax.bar(x + width/2, despues_data, width, label='Después', alpha=0.7, color='forestgreen')
-        
-        ax.set_xlabel('Número de Periodo')
-        ax.set_ylabel('Venta Promedio ($)')
-        ax.set_title('Venta Promedio: Antes vs Después')
-        ax.set_xticks(x)
-        ax.set_xticklabels([f'P{i+1}' for i in range(len(antes_data))])
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        # Añadir valores
-        for bars in [bars1, bars2]:
-            for bar in bars:
-                height = bar.get_height()
-                ax.text(bar.get_x() + bar.get_width()/2, height + max(np.concatenate([antes_data, despues_data]))*0.01,
-                       f'${height:.0f}', ha='center', va='bottom', fontsize=8)
-        
-        st.pyplot(fig)
-    
-    # Análisis estadístico
-    st.subheader("Análisis Estadístico")
-    
-    col9, col10 = st.columns(2)
-    
-    with col9:
-        # Extraer datos para prueba t
-        ventas_antes = df_periodos[df_periodos['grupo'] == 'antes']['sales']
-        ventas_despues = df_periodos[df_periodos['grupo'] == 'despues']['sales']
-        
-        if len(ventas_antes) > 1 and len(ventas_despues) > 1:
-            t_stat, p_valor = ttest_ind(ventas_despues, ventas_antes, equal_var=False)
+        if len(before_data) >= 10 and len(after_data) >= 10:
+            # Calcular estadísticas básicas
+            before_mean = before_data.mean()
+            after_mean = after_data.mean()
+            mean_diff = after_mean - before_mean
             
-            # Tamaño del efecto
-            n1, n2 = len(ventas_despues), len(ventas_antes)
-            pooled_sd = np.sqrt(((n1-1)*ventas_despues.var() + (n2-1)*ventas_antes.var()) / (n1+n2-2))
-            if pooled_sd != 0:
-                cohens_d = (ventas_despues.mean() - ventas_antes.mean()) / pooled_sd
+            # Calcular cambio porcentual
+            try:
+                pct_change = (mean_diff / abs(before_mean)) * 100 if before_mean != 0 else np.nan
+            except (TypeError, ZeroDivisionError):
+                pct_change = np.nan
+            
+            # 1. Prueba t de Student
+            t_stat, p_val_ttest = ttest_ind(after_data, before_data, equal_var=False)
+            
+            # 2. Prueba U de Mann-Whitney (no paramétrica)
+            u_stat, p_val_mw = mannwhitneyu(after_data, before_data, alternative='two-sided')
+            
+            # 3. Tamaño del efecto (Cohen's d)
+            n1, n2 = len(before_data), len(after_data)
+            if n1 > 1 and n2 > 1:
+                var1 = before_data.var()
+                var2 = after_data.var()
+                sd_pooled = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2))
+                cohens_d = mean_diff / sd_pooled if sd_pooled != 0 else np.nan
             else:
-                cohens_d = 0
+                cohens_d = np.nan
             
-            st.metric("Valor p", f"{p_valor:.6f}")
-            st.metric("Significancia", "Significativo" if p_valor < 0.05 else "No significativo")
-            st.metric("Tamaño efecto (d)", f"{cohens_d:.3f}")
+            # 4. Correlación punto-biserial
+            try:
+                combined_data = df[[col, 'Campaign']].dropna()
+                combined_data['Campaign_numeric'] = combined_data['Campaign'].map({'Before': 0, 'After': 1})
+                pb_corr, pb_pval = pointbiserialr(combined_data[col], combined_data['Campaign_numeric'])
+            except:
+                pb_corr, pb_pval = np.nan, np.nan
             
-            # Calcular intervalos de confianza
-            def intervalo_confianza(data, confianza=0.95):
-                n = len(data)
-                media = np.mean(data)
-                error = np.std(data, ddof=1) / np.sqrt(n)
-                margen = error * t.ppf((1 + confianza)/2, n-1)
-                return media - margen, media + margen
-            
-            ic_antes = intervalo_confianza(ventas_antes)
-            ic_despues = intervalo_confianza(ventas_despues)
-            
-            st.write("Intervalos 95% confianza:")
-            st.write(f"Antes: ${ic_antes[0]:.2f} - ${ic_antes[1]:.2f}")
-            st.write(f"Después: ${ic_despues[0]:.2f} - ${ic_despues[1]:.2f}")
+            test_results.append({
+                'Variable': col,
+                'Media_Antes': before_mean,
+                'Media_Despues': after_mean,
+                'Diferencia_Media': mean_diff,
+                'Cambio_Porcentual': pct_change,
+                'Valor_p_TTest': p_val_ttest,
+                'Valor_p_MannWhitney': p_val_mw,
+                'Correlacion_PuntoBiserial': pb_corr,
+                'Cohens_d': cohens_d,
+                'Significativo_TTest': p_val_ttest < 0.05,
+                'Significativo_MW': p_val_mw < 0.05
+            })
+
+if test_results:
+    results_df = pd.DataFrame(test_results)
     
-    with col10:
-        # Métricas agregadas
-        ventas_totales_antes = df_periodos[df_periodos['grupo'] == 'antes']['sales'].sum()
-        ventas_totales_despues = df_periodos[df_periodos['grupo'] == 'despues']['sales'].sum()
-        
-        promedio_antes = df_periodos[df_periodos['grupo'] == 'antes']['sales'].mean()
-        promedio_despues = df_periodos[df_periodos['grupo'] == 'despues']['sales'].mean()
-        
-        transacciones_antes = len(df_periodos[df_periodos['grupo'] == 'antes'])
-        transacciones_despues = len(df_periodos[df_periodos['grupo'] == 'despues'])
-        
-        cambio_ventas = ((ventas_totales_despues - ventas_totales_antes) / ventas_totales_antes) * 100
-        cambio_promedio = ((promedio_despues - promedio_antes) / promedio_antes) * 100
-        cambio_transacciones = ((transacciones_despues - transacciones_antes) / transacciones_antes) * 100
-        
-        st.write("Métricas Agregadas:")
-        st.write(f"Ventas totales antes: ${ventas_totales_antes:,.0f}")
-        st.write(f"Ventas totales después: ${ventas_totales_despues:,.0f}")
-        st.write(f"Cambio ventas: {cambio_ventas:+.1f}%")
-        
-        st.write(f"Venta promedio antes: ${promedio_antes:.2f}")
-        st.write(f"Venta promedio después: ${promedio_despues:.2f}")
-        st.write(f"Cambio promedio: {cambio_promedio:+.1f}%")
-        
-        st.write(f"Transacciones antes: {transacciones_antes:,}")
-        st.write(f"Transacciones después: {transacciones_despues:,}")
-        st.write(f"Cambio transacciones: {cambio_transacciones:+.1f}%")
+    # Ordenar por tamaño del efecto absoluto
+    results_df['Tamaño_Efecto_Absoluto'] = results_df['Cohens_d'].abs()
+    results_df = results_df.sort_values('Tamaño_Efecto_Absoluto', ascending=False)
     
-    # Análisis de productos durante campaña
-    st.subheader("Análisis de Productos Durante Campaña")
+    # Mostrar resultados en Streamlit
+    st.subheader("Resultados de Pruebas de Hipótesis")
     
-    # Mejores productos durante campaña
-    productos_campaña = df_periodos[df_periodos['grupo'] == 'despues']
+    # Formatear para mejor visualización
+    display_cols = ['Variable', 'Media_Antes', 'Media_Despues', 'Cambio_Porcentual', 
+                    'Correlacion_PuntoBiserial', 'Cohens_d', 'Valor_p_TTest', 'Significativo_TTest']
     
-    if len(productos_campaña) > 0:
-        # Top productos por crecimiento
-        ventas_antes_por_producto = df_periodos[df_periodos['grupo'] == 'antes'].groupby('brand')['sales'].sum()
-        ventas_despues_por_producto = productos_campaña.groupby('brand')['sales'].sum()
+    display_df = results_df[display_cols].round({
+        'Media_Antes': 2,
+        'Media_Despues': 2,
+        'Cambio_Porcentual': 1,
+        'Correlacion_PuntoBiserial': 3,
+        'Cohens_d': 3,
+        'Valor_p_TTest': 4
+    })
+    
+    # Añadir símbolos para significancia
+    def add_sig_symbol(p_val, sig):
+        if sig:
+            return f"{p_val:.4f}*"
+        return f"{p_val:.4f}"
+    
+    display_df['Valor_p_TTest'] = [add_sig_symbol(p, s) for p, s in 
+                                   zip(results_df['Valor_p_TTest'], results_df['Significativo_TTest'])]
+    
+    # Mostrar tabla
+    st.dataframe(display_df.style.format({
+        'Media_Antes': '${:.2f}',
+        'Media_Despues': '${:.2f}',
+        'Cambio_Porcentual': '{:.1f}%',
+        'Correlacion_PuntoBiserial': '{:.3f}',
+        'Cohens_d': '{:.3f}'
+    }))
+    
+    # Resumen estadístico
+    st.subheader("Resumen Estadístico")
+    
+    n_significant_ttest = results_df['Significativo_TTest'].sum()
+    n_significant_mw = results_df['Significativo_MW'].sum()
+    
+    col_sum1, col_sum2 = st.columns(2)
+    
+    with col_sum1:
+        st.metric("Variables con diferencias significativas (T-Test)", 
+                 f"{n_significant_ttest} de {len(results_df)}",
+                 f"{n_significant_ttest/len(results_df)*100:.1f}%")
+    
+    with col_sum2:
+        st.metric("Variables con diferencias significativas (Mann-Whitney)", 
+                 f"{n_significant_mw} de {len(results_df)}",
+                 f"{n_significant_mw/len(results_df)*100:.1f}%")
+    
+    # Top 3 variables más afectadas
+    st.subheader("Top 3 Variables Más Afectadas por la Campaña")
+    
+    top_3 = results_df.head(3)
+    for i, row in top_3.iterrows():
+        col_top1, col_top2, col_top3 = st.columns(3)
         
-        crecimiento_productos = pd.DataFrame({
-            'antes': ventas_antes_por_producto,
-            'despues': ventas_despues_por_producto
-        }).fillna(0)
+        with col_top1:
+            st.metric(f"{row['Variable']} - Media Antes", f"${row['Media_Antes']:.2f}")
         
-        crecimiento_productos['cambio'] = ((crecimiento_productos['despues'] - crecimiento_productos['antes']) / 
-                                          crecimiento_productos['antes'].replace(0, np.nan)) * 100
-        crecimiento_productos['cambio'] = crecimiento_productos['cambio'].replace([np.inf, -np.inf], np.nan)
+        with col_top2:
+            st.metric(f"{row['Variable']} - Media Después", f"${row['Media_Despues']:.2f}")
         
-        # Productos con mayor crecimiento
-        top_crecimiento = crecimiento_productos.dropna().nlargest(10, 'cambio')
+        with col_top3:
+            if pd.notna(row['Cambio_Porcentual']):
+                st.metric(f"{row['Variable']} - Cambio", f"{row['Cambio_Porcentual']:+.1f}%")
+            else:
+                st.metric(f"{row['Variable']} - Tamaño Efecto", f"d = {row['Cohens_d']:.3f}")
+    
+    # Visualización de resultados significativos
+    st.subheader("Visualización de Resultados Significativos")
+    
+    significant_vars = results_df[results_df['Significativo_TTest']]['Variable'].tolist()
+    
+    if significant_vars:
+        # Mostrar gráficos en pestañas
+        tabs = st.tabs(significant_vars[:3])  # Mostrar máximo 3 pestañas
         
-        col11, col12 = st.columns(2)
-        
-        with col11:
-            # Gráfico de mejores productos
-            fig, ax = plt.subplots(figsize=(10, 6))
-            
-            if len(top_crecimiento) > 0:
-                bars = ax.barh(range(len(top_crecimiento)), top_crecimiento['cambio'].values, 
-                              alpha=0.7, color='green')
-                ax.set_yticks(range(len(top_crecimiento)))
-                ax.set_yticklabels(top_crecimiento.index)
-                ax.set_xlabel('Crecimiento (%)')
-                ax.set_title('Top 10 Productos por Crecimiento')
-                ax.grid(True, alpha=0.3, axis='x')
+        for idx, var in enumerate(significant_vars[:3]):
+            with tabs[idx]:
+                fig, axes = plt.subplots(1, 2, figsize=(12, 4))
                 
-                for i, (bar, val) in enumerate(zip(bars, top_crecimiento['cambio'].values)):
-                    ax.text(val + 1, bar.get_y() + bar.get_height()/2, 
-                           f'{val:+.1f}%', va='center')
-            
-            st.pyplot(fig)
-        
-        with col12:
-            # Productos con mayores ventas durante campaña
-            top_ventas_campaña = productos_campaña.groupby('brand')['sales'].sum().nlargest(10)
-            
-            fig, ax = plt.subplots(figsize=(10, 6))
-            bars = ax.barh(range(len(top_ventas_campaña)), top_ventas_campaña.values, 
-                          alpha=0.7, color='darkorange')
-            ax.set_yticks(range(len(top_ventas_campaña)))
-            ax.set_yticklabels(top_ventas_campaña.index)
-            ax.set_xlabel('Ventas Totales ($)')
-            ax.set_title('Top 10 Productos Durante Campaña')
-            ax.grid(True, alpha=0.3, axis='x')
-            
-            for i, (bar, val) in enumerate(zip(bars, top_ventas_campaña.values)):
-                ax.text(val + max(top_ventas_campaña.values)*0.01, bar.get_y() + bar.get_height()/2, 
-                       f'${val:,.0f}', va='center')
-            
-            st.pyplot(fig)
-    
-    # Resumen ejecutivo
-    st.markdown("---")
-    st.header("Resumen Ejecutivo")
-    
-    col13, col14 = st.columns(2)
-    
-    with col13:
-        st.write("Resultados Clave:")
-        
-        conclusiones = []
-        
-        if p_valor < 0.05:
-            if cambio_ventas > 0:
-                conclusiones.append(f"Impacto positivo significativo: La campaña aumentó ventas en {cambio_ventas:+.1f}%")
-            else:
-                conclusiones.append(f"Impacto negativo significativo: La campaña redujo ventas en {abs(cambio_ventas):.1f}%")
-        else:
-            conclusiones.append("Sin impacto significativo: No hay evidencia estadística de cambio")
-        
-        if cambio_promedio > 10:
-            conclusiones.append(f"Aumento en ticket promedio: Los clientes gastan {cambio_promedio:+.1f}% más por transacción")
-        
-        if cambio_transacciones > 10:
-            conclusiones.append(f"Más transacciones: Volumen aumentó {cambio_transacciones:+.1f}%")
-        
-        if len(productos_campaña) > 0:
-            mejor_producto = top_crecimiento.index[0] if len(top_crecimiento) > 0 else "N/A"
-            if len(top_crecimiento) > 0:
-                mejor_crecimiento = top_crecimiento['cambio'].iloc[0]
-                conclusiones.append(f"Producto estrella: {mejor_producto} creció {mejor_crecimiento:+.1f}%")
-        
-        for conclusion in conclusiones:
-            st.write(f"• {conclusion}")
-    
-    with col14:
-        st.write("Recomendaciones:")
-        
-        recomendaciones = []
-        
-        if p_valor < 0.05 and cambio_ventas > 0:
-            recomendaciones.append("Continuar campaña: Los resultados justifican continuar")
-            recomendaciones.append("Optimizar elementos exitosos: Identificar qué funcionó mejor")
-            recomendaciones.append("Expandir a otros productos: Aplicar estrategias similares")
-        elif p_valor < 0.05 and cambio_ventas < 0:
-            recomendaciones.append("Reevaluar estrategia: Revisar elementos de la campaña")
-            recomendaciones.append("Realizar investigación: Entender por qué no funcionó")
-            recomendaciones.append("Probar nuevos enfoques: Experimentar con diferentes tácticas")
-        else:
-            recomendaciones.append("Ampliar periodo de prueba: Dar más tiempo para ver efectos")
-            recomendaciones.append("Aumentar presupuesto: Incrementar alcance de la campaña")
-            recomendaciones.append("Segmentar mejor: Enfocarse en clientes más receptivos")
-        
-        for i, recomendacion in enumerate(recomendaciones, 1):
-            st.write(f"{i}. {recomendacion}")
+                # Boxplot
+                sns.boxplot(data=df, x='Campaign', y=var, ax=axes[0])
+                axes[0].set_title(f'Diagrama de Cajas: {var} por Campaña')
+                axes[0].set_ylabel(var)
+                axes[0].set_xlabel('Periodo')
+                
+                # Violin plot
+                sns.violinplot(data=df, x='Campaign', y=var, ax=axes[1])
+                axes[1].set_title(f'Distribución: {var} por Campaña')
+                axes[1].set_ylabel(var)
+                axes[1].set_xlabel('Periodo')
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+                
+                # Mostrar estadísticas específicas
+                var_stats = results_df[results_df['Variable'] == var].iloc[0]
+                
+                col_var1, col_var2 = st.columns(2)
+                
+                with col_var1:
+                    st.write("**Estadísticas de la Variable:**")
+                    st.write(f"- Media Antes: ${var_stats['Media_Antes']:.2f}")
+                    st.write(f"- Media Después: ${var_stats['Media_Despues']:.2f}")
+                    st.write(f"- Diferencia: ${var_stats['Diferencia_Media']:.2f}")
+                    
+                    if pd.notna(var_stats['Cambio_Porcentual']):
+                        st.write(f"- Cambio: {var_stats['Cambio_Porcentual']:+.1f}%")
+                
+                with col_var2:
+                    st.write("**Resultados Estadísticos:**")
+                    st.write(f"- Valor p (T-Test): {var_stats['Valor_p_TTest']:.4f}")
+                    st.write(f"- Cohen's d: {var_stats['Cohens_d']:.3f}")
+                    st.write(f"- Interpretación tamaño efecto: {interpret_cohens_d(var_stats['Cohens_d'])}")
+                    st.write(f"- Correlación punto-biserial: {var_stats['Correlacion_PuntoBiserial']:.3f}")
+    else:
+        st.info("No se encontraron variables con diferencias estadísticamente significativas")
 
 else:
-    st.warning("No hay suficientes datos para el análisis comparativo")
+    st.warning("No se pudieron realizar pruebas de hipótesis - verifique que haya datos suficientes")
 
-# Pie de página
+# ==================== EXPORTACIÓN DE RESULTADOS ====================
 st.markdown("---")
-st.write(f"Análisis completado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+st.header("Exportación de Resultados")
 
+# Crear resumen ejecutivo
+summary_data = {
+    'Fecha_analisis': [datetime.now().strftime('%Y-%m-%d %H:%M')],
+    'Fecha_campaña': [campaign_date.strftime('%Y-%m-%d')],
+    'Muestra_total': [len(df)],
+    'Antes_campaña': [len(df[df['Campaign'] == 'Before'])],
+    'Despues_campaña': [len(df[df['Campaign'] == 'After'])],
+    'Variables_analizadas': [len(Num_cols)],
+    'Variables_significativas': [n_significant_ttest if 'n_significant_ttest' in locals() else 0],
+    'Venta_promedio_total': [f"${df['sales'].mean():.2f}"],
+    'Asimetría_ventas': [f"{skew(df['sales'].dropna()):.4f}"],
+    'Curtosis_ventas': [f"{kurtosis(df['sales'].dropna()):.4f}"]
+}
+
+summary_df = pd.DataFrame(summary_data)
+
+# Botones para descargar diferentes reportes
+col_exp1, col_exp2, col_exp3 = st.columns(3)
+
+with col_exp1:
+    if st.button("Generar Reporte Ejecutivo"):
+        csv = summary_df.to_csv(index=False)
+        st.download_button(
+            label="Descargar Reporte Ejecutivo (CSV)",
+            data=csv,
+            file_name=f"reporte_ejecutivo_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv"
+        )
+
+with col_exp2:
+    if test_results:
+        if st.button("Generar Reporte de Pruebas de Hipótesis"):
+            results_csv = results_df.to_csv(index=False)
+            st.download_button(
+                label="Descargar Resultados Pruebas (CSV)",
+                data=results_csv,
+                file_name=f"resultados_hipotesis_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv"
+            )
+
+with col_exp3:
+    if st.button("Generar Reporte Completo"):
+        # Crear reporte completo combinado
+        full_report = {
+            'Resumen_Ejecutivo': summary_df,
+            'Estadisticas_Descriptivas': df.describe().reset_index(),
+            'Resultados_Hipotesis': results_df if test_results else pd.DataFrame()
+        }
+        
+        # Crear Excel con múltiples hojas
+        from io import BytesIO
+        import openpyxl
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            summary_df.to_excel(writer, sheet_name='Resumen', index=False)
+            df.describe().to_excel(writer, sheet_name='Estadisticas')
+            if test_results:
+                results_df.to_excel(writer, sheet_name='Pruebas_Hipotesis', index=False)
+        
+        st.download_button(
+            label="Descargar Reporte Completo (Excel)",
+            data=output.getvalue(),
+            file_name=f"reporte_completo_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+# ==================== PIE DE PÁGINA ====================
+st.markdown("---")
+st.write(f"Análisis estadístico completado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+st.write("Herramienta de análisis estadístico multivariado - Versión 2.0")
