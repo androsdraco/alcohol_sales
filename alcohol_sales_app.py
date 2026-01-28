@@ -23,7 +23,7 @@ st.title("Panel de Análisis de Ventas de Alcohol")
 st.header("Configuración de Datos")
 
 # Cargar archivo desde ubicación fija
-file_path = r"CSV\Alcohol sales.csv"
+file_path = r"CSV/Alcohol sales.csv"
 
 # Verificar si el archivo existe
 if not os.path.exists(file_path):
@@ -597,3 +597,4 @@ else:
 # Pie de página
 st.markdown("---")
 st.write(f"Análisis completado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+
