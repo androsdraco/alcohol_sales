@@ -82,7 +82,7 @@ def generate_realistic_dataset():
 # Generate data
 df, campaign_date, end_date = generate_realistic_dataset()
 
-# Create two-month periods for comparison
+# Create two-month periods for fair comparison
 def create_two_month_periods(df, campaign_date, end_date):
     """Create two-month periods before and after campaign start"""
     # Create period labels
@@ -347,6 +347,7 @@ with col1:
         st.write(f"First Month: {campaign_date.strftime('%b %d')} - {first_month_end.strftime('%b %d')}")
         st.write(f"Second Month: {first_month_end.strftime('%b %d')} - {end_date.strftime('%b %d')}")
 
+# In the Product Performance section (around line 369):
 with col2:
     # Product performance during campaign
     campaign_products = df[df['period'] == 'Campaign'].groupby('brand').agg({  # Changed 'Period' to 'period'
@@ -517,10 +518,10 @@ with col_export2:
             file_name="two_month_period_analysis.csv",
             mime="text/csv"
         )
-
+# In the Export Options section (around line 451):
 with col_export3:
     if st.button("Download Campaign Product Performance"):
-        product_data = df[df['period'] == 'Campaign'].groupby('brand').agg({ 
+        product_data = df[df['period'] == 'Campaign'].groupby('brand').agg({  # Changed 'Period' to 'period'
             'sales': ['sum', 'mean', 'count']
         }).round(2)
         
