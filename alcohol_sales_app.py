@@ -3,541 +3,597 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import ttest_ind, mannwhitneyu, pointbiserialr, skew, kurtosis
+from scipy.stats import ttest_ind, t
 from datetime import datetime, timedelta
 import warnings
+import re
+import os
 warnings.filterwarnings('ignore')
 
-# Set page config
+# Configuración de página
 st.set_page_config(
-    page_title="Alcohol Sales Analytics",
+    page_title="Análisis de Ventas de Alcohol",
     layout="wide"
 )
 
-# Title
-st.title("Alcohol Sales Analytics Dashboard")
+# Título
+st.title("Panel de Análisis de Ventas de Alcohol")
 
-# Generate realistic dataset with exact specifications
-def generate_realistic_dataset():
-    np.random.seed(42)
+# Sección de configuración en la parte superior
+st.header("Configuración de Datos")
+
+# Cargar archivo desde ubicación fija
+file_path = r"CSV\Alcohol sales.csv"
+
+# Verificar si el archivo existe
+if not os.path.exists(file_path):
+    st.error(f"No se encontró el archivo en la ubicación: {file_path}")
+    st.write("Por favor, asegúrate de que el archivo 'Alcohol sales.csv' esté en la carpeta CSV")
+    st.stop()
+
+st.write(f"Archivo cargado: {file_path}")
+
+# Configuración de campaña
+st.header("Configuración de Campaña")
+
+col3, col4, col5 = st.columns(3)
+
+with col3:
+    campaign_date = st.date_input(
+        "Fecha de Inicio de Campaña",
+        value=pd.Timestamp('2023-01-10'),
+        help="Selecciona la fecha cuando comenzó tu campaña"
+    )
+
+with col4:
+    analysis_end_date = st.date_input(
+        "Fecha Final de Análisis",
+        value=pd.Timestamp('2023-03-10'),
+        help="Selecciona la fecha final para tu análisis"
+    )
+
+with col5:
+    period_option = st.selectbox(
+        "Longitud del Periodo",
+        ["1 día", "1 semana"],
+        help="Selecciona la longitud del periodo para comparación"
+    )
+
+# Convertir opción de periodo a días
+period_days = {"1 día": 1, "1 semana": 7}
+comparison_days = period_days[period_option]
+
+# Convertir a Timestamps
+campaign_date = pd.Timestamp(campaign_date)
+analysis_end_date = pd.Timestamp(analysis_end_date)
+
+# Función para limpiar datos de ventas
+def clean_sales_data(df):
+    if df is None:
+        return None
     
-    n_records = 7500
-    brands = [f'Product_{i:02d}' for i in range(1, 26)]
+    df = df.copy()
     
-    # Date range from 2022-01-01 to 2023-03-10
-    start_date = pd.Timestamp('2022-01-01')
-    end_date = pd.Timestamp('2023-03-10')
+    if 'sales' not in df.columns:
+        return None
     
-    # Generate dates with realistic distribution
-    days_range = (end_date - start_date).days
-    days_since_start = np.random.beta(2, 1, n_records) * days_range
-    dates = start_date + pd.to_timedelta(days_since_start, unit='D')
-    
-    dates = pd.to_datetime(dates)
-    brand_weights = np.random.dirichlet(np.ones(25)) * 100
-    
-    # Campaign starts exactly 2 months before end date
-    campaign_date = end_date - pd.DateOffset(months=2)
-    
-    data = []
-    for i in range(n_records):
-        date = dates[i]
-        brand_idx = np.random.choice(range(25), p=brand_weights/brand_weights.sum())
-        brand = brands[brand_idx]
+    def clean_sale_value(value):
+        if pd.isna(value):
+            return np.nan
         
-        brand_base = 500 + brand_idx * 40
-        day_of_year = date.dayofyear
-        seasonal = 1 + 0.3 * np.sin(2 * np.pi * (day_of_year - 30) / 365)
-        weekend_boost = 1.25 if date.weekday() >= 5 else 1.0
+        value_str = str(value)
+        value_str = re.sub(r'[$,€£¥\s]', '', value_str)
         
-        # Campaign effect - more pronounced in second month
-        if date < campaign_date:
-            campaign_multiplier = 1.0
-        else:
-            # Different response patterns based on time since campaign start
-            days_since_campaign = (date - campaign_date).days
-            if days_since_campaign < 30:  # First month
-                brand_response = 0.5 + (brand_idx % 10) / 20
-                campaign_multiplier = 1.0 + brand_response * 0.15
-            else:  # Second month
-                brand_response = 0.8 + (brand_idx % 10) / 20
-                campaign_multiplier = 1.0 + brand_response * 0.3
+        if ',' in value_str and '.' in value_str:
+            value_str = value_str.replace(',', '')
+        elif ',' in value_str and '.' not in value_str:
+            parts = value_str.split(',')
+            if len(parts) == 2 and len(parts[1]) <= 2:
+                value_str = value_str.replace(',', '.')
+            else:
+                value_str = value_str.replace(',', '')
         
-        base_sale = brand_base * seasonal * weekend_boost * campaign_multiplier
-        sale = np.random.lognormal(np.log(base_sale), 0.4)
-        sale = round(max(10, sale), 2)
+        try:
+            return float(value_str)
+        except:
+            return np.nan
+    
+    df['sales'] = df['sales'].apply(clean_sale_value)
+    df = df.dropna(subset=['sales'])
+    df = df[df['sales'] >= 0]
+    
+    return df
+
+# Función para cargar datos
+def load_data():
+    try:
+        # Leer archivo desde ubicación fija
+        df = pd.read_csv(file_path)
         
-        data.append({
-            'date': date,
-            'brand': brand,
-            'sales': sale
-        })
-    
-    df = pd.DataFrame(data)
-    df = df.sort_values('date').reset_index(drop=True)
-    df['campaign'] = np.where(df['date'] < campaign_date, 'Before', 'After')
-    
-    return df, campaign_date, end_date
+        # Manejar columna de fecha
+        date_cols = ['date', 'Date', 'DATE', 'fecha', 'Fecha']
+        for date_col in date_cols:
+            if date_col in df.columns:
+                try:
+                    df['date'] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
+                    if df['date'].isna().any():
+                        df['date'] = pd.to_datetime(df[date_col], format='%d/%m/%y', errors='coerce')
+                    break
+                except:
+                    continue
+        
+        # Buscar columna de ventas
+        sales_cols = ['sales', 'Sales', 'ventas', 'Ventas']
+        for sales_col in sales_cols:
+            if sales_col in df.columns:
+                df['sales'] = df[sales_col]
+                break
+        
+        # Limpiar datos de ventas
+        df = clean_sales_data(df)
+        if df is None:
+            return None
+        
+        # Buscar columna de marca
+        brand_cols = ['brand', 'Brand', 'marca', 'Marca', 'producto', 'Producto']
+        for brand_col in brand_cols:
+            if brand_col in df.columns:
+                df['brand'] = df[brand_col].astype(str)
+                break
+        
+        # Eliminar filas con fechas inválidas
+        df = df.dropna(subset=['date'])
+        
+        # Filtrar datos hasta la fecha final de análisis
+        df = df[df['date'] <= analysis_end_date]
+        
+        # Ordenar por fecha
+        df = df.sort_values('date').reset_index(drop=True)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Error cargando archivo: {str(e)}")
+        return None
 
-# Generate data
-df, campaign_date, end_date = generate_realistic_dataset()
+# Cargar los datos
+df = load_data()
 
-# Create two-month periods for fair comparison
-def create_two_month_periods(df, campaign_date, end_date):
-    """Create two-month periods before and after campaign start"""
-    # Create period labels
-    periods = []
-    
-    # Calculate 6 two-month periods before campaign (1 year)
-    for i in range(6, 0, -1):
-        period_end = campaign_date - pd.DateOffset(days=(i-1)*60)
-        period_start = period_end - pd.DateOffset(days=60)
-        periods.append({
-            'period': f'P-{i}',
-            'start': period_start,
-            'end': period_end - timedelta(days=1),  # Exclude end date
-            'label': f'{(period_start).strftime("%b")}-{(period_end - timedelta(days=1)).strftime("%b")} {(period_start.year)}',
-            'campaign': 'Before'
-        })
-    
-    # Campaign period (2 months)
-    campaign_period = {
-        'period': 'Campaign',
-        'start': campaign_date,
-        'end': end_date,
-        'label': f'Campaign: {campaign_date.strftime("%b %d")}-{end_date.strftime("%b %d")}',
-        'campaign': 'After'
-    }
-    periods.append(campaign_period)
-    
-    # Assign each record to a period
-    df['period'] = 'Other'
-    df['period_label'] = 'Other'
-    
-    for period in periods:
-        mask = (df['date'] >= period['start']) & (df['date'] <= period['end'])
-        df.loc[mask, 'period'] = period['period']
-        df.loc[mask, 'period_label'] = period['label']
-    
-    return df, periods
+if df is None:
+    st.stop()
 
-df, periods = create_two_month_periods(df, campaign_date, end_date)
+# Mostrar información básica del archivo
+st.write(f"Total de registros: {len(df)}")
+st.write(f"Rango de fechas: {df['date'].min().date()} al {df['date'].max().date()}")
 
-# Dashboard Metrics
+# Análisis Exploratorio de Datos (EDA)
 st.markdown("---")
-st.subheader("Key Metrics")
+st.header("Análisis Exploratorio de Datos")
 
-col1, col2, col3, col4, col5 = st.columns(5)
+# Métricas básicas
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     total_sales = df['sales'].sum()
-    st.metric("Total Revenue", f"${total_sales:,.0f}")
+    st.metric("Ventas Totales", f"${total_sales:,.0f}")
 
 with col2:
     avg_sale = df['sales'].mean()
-    st.metric("Average Transaction", f"${avg_sale:.2f}")
+    st.metric("Venta Promedio", f"${avg_sale:.2f}")
 
 with col3:
-    st.metric("Total Transactions", f"{len(df):,}")
+    transaction_count = len(df)
+    st.metric("Total Transacciones", f"{transaction_count:,}")
 
 with col4:
-    st.metric("Unique Products", df['brand'].nunique())
+    unique_products = df['brand'].nunique()
+    st.metric("Productos Únicos", f"{unique_products}")
+
+# Gráficos EDA
+col5, col6 = st.columns(2)
 
 with col5:
-    date_range = f"{df['date'].min().strftime('%b %Y')} - {df['date'].max().strftime('%b %Y')}"
-    st.metric("Analysis Period", date_range)
-
-st.markdown("---")
-
-# Two-Month Periods Analysis
-st.subheader("Two-Month Periods Comparison")
-
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    # Calculate period metrics
-    period_data = df[df['period'] != 'Other'].groupby(['period', 'period_label', 'campaign']).agg({
-        'sales': ['sum', 'mean', 'count', 'std']
-    }).round(2).reset_index()
-    
-    period_data.columns = ['Period', 'Label', 'Campaign', 'Total_Sales', 'Avg_Sales', 'Transaction_Count', 'Std_Sales']
-    
-    # Sort periods chronologically
-    period_order = [f'P-{i}' for i in range(6, 0, -1)] + ['Campaign']
-    period_data['Period_Order'] = pd.Categorical(period_data['Period'], categories=period_order, ordered=True)
-    period_data = period_data.sort_values('Period_Order')
-    
-    # Create visualization
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10), gridspec_kw={'height_ratios': [2, 1]})
-    
-    # Bar chart for total sales by period
-    x = np.arange(len(period_data))
-    colors = ['steelblue' if p == 'Before' else 'forestgreen' for p in period_data['Campaign']]
-    
-    bars = ax1.bar(x, period_data['Total_Sales'], color=colors, alpha=0.7)
-    ax1.set_xlabel('Two-Month Period')
-    ax1.set_ylabel('Total Sales ($)')
-    ax1.set_title('Total Sales by Two-Month Period', fontsize=14)
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(period_data['Label'], rotation=45, ha='right')
-    ax1.grid(True, alpha=0.3, axis='y')
-    
-    # Add value labels on bars
-    for bar, val in zip(bars, period_data['Total_Sales']):
-        height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2, height + (0.01 * max(period_data['Total_Sales'])),
-                f'${val:,.0f}', ha='center', va='bottom', fontsize=9)
-    
-    # Line chart for average sales
-    ax2.plot(x, period_data['Avg_Sales'], marker='o', linewidth=2, markersize=8, color='darkorange')
-    ax2.set_xlabel('Two-Month Period')
-    ax2.set_ylabel('Average Sale ($)')
-    ax2.set_title('Average Sale by Two-Month Period', fontsize=14)
-    ax2.set_xticks(x)
-    ax2.set_xticklabels(period_data['Label'], rotation=45, ha='right')
-    ax2.grid(True, alpha=0.3)
-    
-    # Highlight campaign period
-    campaign_idx = np.where(period_data['Period'] == 'Campaign')[0][0]
-    ax1.axvspan(campaign_idx - 0.4, campaign_idx + 0.4, alpha=0.2, color='green')
-    ax2.axvspan(campaign_idx - 0.4, campaign_idx + 0.4, alpha=0.2, color='green')
-    
-    plt.tight_layout()
+    # Distribución de ventas
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.hist(df['sales'], bins=50, alpha=0.7, color='steelblue', edgecolor='black')
+    ax.set_xlabel('Monto de Venta ($)')
+    ax.set_ylabel('Frecuencia')
+    ax.set_title('Distribución de Montos de Venta')
+    ax.grid(True, alpha=0.3)
     st.pyplot(fig)
 
-with col2:
-    st.write("Period Performance Metrics")
+with col6:
+    # Ventas por día de la semana
+    df['dia_semana'] = df['date'].dt.day_name()
+    dias_orden = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    df['dia_semana'] = pd.Categorical(df['dia_semana'], categories=dias_orden, ordered=True)
     
-    # Show last 4 periods including campaign
-    recent_periods = period_data.tail(4).reset_index(drop=True)
+    ventas_por_dia = df.groupby('dia_semana')['sales'].mean().reindex(dias_orden)
     
-    for idx, row in recent_periods.iterrows():
-        if row['Period'] == 'Campaign':
-            # Compare with previous period
-            if idx > 0:
-                prev_avg = recent_periods.iloc[idx-1]['Avg_Sales']
-                change_pct = ((row['Avg_Sales'] - prev_avg) / prev_avg) * 100
-                delta_display = f"{change_pct:+.1f}%"
-            else:
-                delta_display = None
-            
-            st.metric(
-                row['Label'],
-                f"${row['Avg_Sales']:.2f}",
-                delta=delta_display
-            )
-            
-            with st.expander(f"Details for {row['Label']}"):
-                st.write(f"Total Sales: ${row['Total_Sales']:,.0f}")
-                st.write(f"Transactions: {row['Transaction_Count']:,}")
-                st.write(f"Avg Sale: ${row['Avg_Sales']:.2f}")
-                st.write(f"Std Dev: ${row['Std_Sales']:.2f}")
-        else:
-            st.metric(
-                row['Label'],
-                f"${row['Avg_Sales']:.2f}"
-            )
-    
-    # Overall comparison
-    st.write("---")
-    st.write("Campaign vs Pre-Campaign Average")
-    
-    campaign_avg = period_data[period_data['Period'] == 'Campaign']['Avg_Sales'].values[0]
-    pre_campaign_avg = period_data[period_data['Period'] != 'Campaign']['Avg_Sales'].mean()
-    overall_change = ((campaign_avg - pre_campaign_avg) / pre_campaign_avg) * 100
-    
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.metric("Pre-Campaign Avg", f"${pre_campaign_avg:.2f}")
-    with col_b:
-        st.metric("Campaign Avg", f"${campaign_avg:.2f}", delta=f"{overall_change:+.1f}%")
-
-st.markdown("---")
-
-# Statistical Analysis with Fair Comparison
-st.subheader("Statistical Analysis with Two-Month Periods")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.write("Period-by-Period Comparison")
-    
-    # Create comparison table
-    comparison_data = []
-    
-    for i in range(1, 7):  # Compare campaign with each of the 6 pre-campaign periods
-        pre_period = f'P-{i}'
-        pre_avg = period_data[period_data['Period'] == pre_period]['Avg_Sales'].values[0]
-        campaign_avg = period_data[period_data['Period'] == 'Campaign']['Avg_Sales'].values[0]
-        change_pct = ((campaign_avg - pre_avg) / pre_avg) * 100
-        
-        comparison_data.append({
-            'Pre-Campaign Period': f'Period {i}',
-            'Pre-Campaign Avg': f"${pre_avg:.2f}",
-            'Campaign Avg': f"${campaign_avg:.2f}",
-            'Change': f"{change_pct:+.1f}%"
-        })
-    
-    comparison_df = pd.DataFrame(comparison_data)
-    st.dataframe(comparison_df, use_container_width=True)
-
-# In the Statistical Analysis section (around line 288):
-with col2:
-    st.write("Statistical Tests")
-    
-    # Extract sales data for statistical tests
-    campaign_sales = df[df['period'] == 'Campaign']['sales']  # Changed 'Period' to 'period'
-    all_pre_campaign_sales = df[df['campaign'] == 'Before']['sales']
-    
-    # Statistical tests
-    t_stat, p_ttest = ttest_ind(campaign_sales, all_pre_campaign_sales, equal_var=False)
-    
-    # Effect size
-    n1, n2 = len(campaign_sales), len(all_pre_campaign_sales)
-    sd_pooled = np.sqrt(((n1-1)*campaign_sales.var() + (n2-1)*all_pre_campaign_sales.var()) / (n1+n2-2))
-    cohens_d = (campaign_sales.mean() - all_pre_campaign_sales.mean()) / sd_pooled
-    
-    # Confidence intervals
-    from scipy.stats import t
-    
-    def confidence_interval(data, confidence=0.95):
-        n = len(data)
-        mean = np.mean(data)
-        std_err = np.std(data, ddof=1) / np.sqrt(n)
-        h = std_err * t.ppf((1 + confidence) / 2, n - 1)
-        return mean - h, mean + h
-    
-    campaign_ci = confidence_interval(campaign_sales)
-    pre_campaign_ci = confidence_interval(all_pre_campaign_sales)
-    
-    st.metric("T-Test P-Value", f"{p_ttest:.6f}")
-    st.metric("Statistical Significance", "Significant" if p_ttest < 0.05 else "Not Significant")
-    st.metric("Effect Size (Cohen's d)", f"{cohens_d:.3f}")
-    
-    st.write("95% Confidence Intervals:")
-    st.write(f"Campaign: ${campaign_ci[0]:.2f} - ${campaign_ci[1]:.2f}")
-    st.write(f"Pre-Campaign: ${pre_campaign_ci[0]:.2f} - ${pre_campaign_ci[1]:.2f}")
-
-st.markdown("---")
-
-# Product Performance in Two-Month Context
-st.subheader("Product Performance During Campaign Period")
-
-col1, col2 = st.columns([1, 2])
-
-with col1:
-    # Analysis options
-    analysis_focus = st.radio(
-        "Focus Analysis On",
-        ["Top Performers", "Most Improved", "Consistency Analysis", "Price Tier Analysis"]
-    )
-    
-    # Time segmentation within campaign
-    st.write("Campaign Time Segmentation")
-    show_first_month = st.checkbox("Show First Month Performance", value=True)
-    show_second_month = st.checkbox("Show Second Month Performance", value=True)
-    
-    if show_first_month and show_second_month:
-        # Create month segments
-        first_month_end = campaign_date + pd.DateOffset(days=30)
-        
-        first_month_sales = df[(df['date'] >= campaign_date) & (df['date'] < first_month_end)]
-        second_month_sales = df[(df['date'] >= first_month_end) & (df['date'] <= end_date)]
-        
-        st.write(f"First Month: {campaign_date.strftime('%b %d')} - {first_month_end.strftime('%b %d')}")
-        st.write(f"Second Month: {first_month_end.strftime('%b %d')} - {end_date.strftime('%b %d')}")
-
-# In the Product Performance section (around line 369):
-with col2:
-    # Product performance during campaign
-    campaign_products = df[df['period'] == 'Campaign'].groupby('brand').agg({  # Changed 'Period' to 'period'
-        'sales': ['sum', 'mean', 'count', 'std']
-    }).round(2)
-    
-    campaign_products.columns = ['Total_Sales', 'Avg_Sales', 'Transaction_Count', 'Std_Sales']
-    campaign_products = campaign_products.sort_values('Total_Sales', ascending=False).head(10)
-    
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    # Calculate position for grouped bars
-    x = np.arange(len(campaign_products))
-    width = 0.35
-    
-    bars1 = ax.bar(x - width/2, campaign_products['Total_Sales'], width, 
-                  label='Total Sales', alpha=0.7, color='steelblue')
-    bars2 = ax.bar(x + width/2, campaign_products['Avg_Sales'] * 100, width,  # Scaled for visibility
-                  label='Avg Sales (x100)', alpha=0.7, color='darkorange')
-    
-    ax.set_xlabel('Product')
-    ax.set_ylabel('Sales ($) / Avg Sales (x100)')
-    ax.set_title('Top 10 Products During Campaign Period', fontsize=14)
-    ax.set_xticks(x)
-    ax.set_xticklabels(campaign_products.index, rotation=45, ha='right')
-    ax.legend()
+    fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.bar(range(len(ventas_por_dia)), ventas_por_dia.values, alpha=0.7, color='forestgreen')
+    ax.set_xlabel('Día de la Semana')
+    ax.set_ylabel('Venta Promedio ($)')
+    ax.set_title('Venta Promedio por Día de la Semana')
+    ax.set_xticks(range(len(ventas_por_dia)))
+    ax.set_xticklabels(['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'])
     ax.grid(True, alpha=0.3, axis='y')
     
-    # Add value labels
-    for bars in [bars1, bars2]:
-        for bar in bars:
-            height = bar.get_height()
-            if bars == bars1:
-                value = f'${height:,.0f}'
-            else:
-                value = f'${height/100:.2f}'
-            ax.text(bar.get_x() + bar.get_width()/2, height + (0.01 * max([b.get_height() for b in bars])),
-                   value, ha='center', va='bottom', fontsize=8)
+    # Añadir valores en las barras
+    for bar, val in zip(bars, ventas_por_dia.values):
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 5, 
+                f'${val:.0f}', ha='center', va='bottom')
     
     st.pyplot(fig)
 
-st.markdown("---")
+# Top productos
+st.subheader("Top 10 Productos por Ventas")
 
-# Executive Summary with Fair Periods Context
-st.subheader("Executive Summary")
+top_products = df.groupby('brand')['sales'].sum().sort_values(ascending=False).head(10)
 
-summary_col1, summary_col2 = st.columns([2, 1])
+fig, ax = plt.subplots(figsize=(12, 6))
+bars = ax.barh(range(len(top_products)), top_products.values, alpha=0.7, color='darkorange')
+ax.set_yticks(range(len(top_products)))
+ax.set_yticklabels(top_products.index)
+ax.set_xlabel('Ventas Totales ($)')
+ax.set_title('Top 10 Productos por Ventas Totales')
+ax.grid(True, alpha=0.3, axis='x')
 
-with summary_col1:
-    # Calculate comprehensive metrics
-    campaign_period_data = period_data[period_data['Period'] == 'Campaign'].iloc[0]
-    pre_campaign_periods_data = period_data[period_data['Period'] != 'Campaign']
-    
-    campaign_total = campaign_period_data['Total_Sales']
-    campaign_avg = campaign_period_data['Avg_Sales']
-    campaign_transactions = campaign_period_data['Transaction_Count']
-    
-    pre_campaign_avg_total = pre_campaign_periods_data['Total_Sales'].mean()
-    pre_campaign_avg_sale = pre_campaign_periods_data['Avg_Sales'].mean()
-    pre_campaign_avg_transactions = pre_campaign_periods_data['Transaction_Count'].mean()
-    
-    total_change = ((campaign_total - pre_campaign_avg_total) / pre_campaign_avg_total) * 100
-    avg_change = ((campaign_avg - pre_campaign_avg_sale) / pre_campaign_avg_sale) * 100
-    transaction_change = ((campaign_transactions - pre_campaign_avg_transactions) / pre_campaign_avg_transactions) * 100
-    
-    # Create summary points
-    summary_points = []
-    
-    summary_points.append(f"**Campaign Period Performance**: {campaign_date.strftime('%b %d, %Y')} to {end_date.strftime('%b %d, %Y')} (2 months)")
-    
-    summary_points.append(f"**Total Revenue**: ${campaign_total:,.0f} ({total_change:+.1f}% vs pre-campaign 2-month average of ${pre_campaign_avg_total:,.0f})")
-    
-    summary_points.append(f"**Average Transaction Value**: ${campaign_avg:.2f} ({avg_change:+.1f}% vs pre-campaign average of ${pre_campaign_avg_sale:.2f})")
-    
-    summary_points.append(f"**Transaction Volume**: {campaign_transactions:,} transactions ({transaction_change:+.1f}% vs pre-campaign average of {pre_campaign_avg_transactions:,.0f})")
-    
-    summary_points.append(f"**Statistical Significance**: {'Statistically significant improvement' if p_ttest < 0.05 else 'No statistically significant difference'} (p={p_ttest:.4f})")
-    
-    summary_points.append(f"**Effect Size**: Cohen's d = {cohens_d:.3f} ({'large' if abs(cohens_d) > 0.8 else 'medium' if abs(cohens_d) > 0.5 else 'small'})")
-    
-    summary_points.append(f"**Data Fairness**: Campaign period compared against 6 previous two-month periods for equitable comparison")
-    
-    for point in summary_points:
-        st.write(f"• {point}")
+# Añadir valores en las barras
+for i, (bar, val) in enumerate(zip(bars, top_products.values)):
+    ax.text(val + max(top_products.values)*0.01, bar.get_y() + bar.get_height()/2, 
+            f'${val:,.0f}', va='center')
 
-with summary_col2:
-    st.write("Strategic Recommendations")
-    
-    # Generate context-aware recommendations
-    if p_ttest < 0.05 and avg_change > 15:
-        recommendations = [
-            "**Scale Successful Campaign Elements**: Campaign demonstrated strong 2-month performance",
-            "**Maintain Momentum**: Continue successful tactics into next quarter",
-            "**Optimize Top Products**: Focus resources on highest performers",
-            "**Expand Successful Segments**: Identify and replicate winning patterns",
-            "**Monitor Sustained Performance**: Track if 2-month gains persist"
-        ]
-    elif p_ttest < 0.05 and avg_change > 0:
-        recommendations = [
-            "**Refine Campaign Execution**: Positive but moderate results suggest optimization potential",
-            "**Focus on High-Performing Periods**: Analyze what worked best within the 2 months",
-            "**Test Variations**: Experiment with different approaches in next campaign",
-            "**Improve Consistency**: Work on maintaining performance throughout entire period",
-            "**Plan Follow-up Analysis**: Monitor longer-term effects"
-        ]
-    elif p_ttest < 0.05 and avg_change < 0:
-        recommendations = [
-            "**Review Campaign Strategy**: Negative impact suggests need for adjustment",
-            "**Analyze Timing**: Consider if 2-month period was optimal",
-            "**Segment Performance**: Identify what didn't work and why",
-            "**Test Alternative Approaches**: Different messaging or timing may work better",
-            "**Consider Market Conditions**: External factors may have influenced results"
-        ]
-    else:
-        recommendations = [
-            "**Extend Analysis Period**: Consider longer observation window",
-            "**Increase Data Collection**: More comprehensive data needed",
-            "**Segment Analysis**: Break down by product type or customer segment",
-            "**Test Different Timeframes**: Alternative 2-month periods may show different results",
-            "**Evaluate Campaign Objectives**: Revisit goals and measurement criteria"
-        ]
-    
-    for i, rec in enumerate(recommendations, 1):
-        st.write(f"{i}. {rec}")
-    
-    # Data fairness note
-    st.write("---")
-    st.write("**Note on Fair Comparison**:")
-    st.write("Analysis uses two-month periods to ensure equitable comparison. The campaign period (2 months) is compared against the average of 6 previous two-month periods, avoiding misleading comparisons with longer or shorter timeframes.")
+st.pyplot(fig)
 
-# Footer with Export Options
-st.markdown("---")
-col_export1, col_export2, col_export3 = st.columns(3)
-
-with col_export1:
-    if st.button("Download Executive Summary"):
-        summary_data = {
-            'Analysis Date': [datetime.now().strftime('%Y-%m-%d')],
-            'Campaign Period': [f"{campaign_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}"],
-            'Campaign Duration': ["2 months"],
-            'Campaign Total Sales': [f"${campaign_total:,.0f}"],
-            'Campaign Average Sale': [f"${campaign_avg:.2f}"],
-            'Pre-Campaign 2-Month Average Sales': [f"${pre_campaign_avg_total:,.0f}"],
-            'Percentage Change vs Pre-Campaign Average': [f"{total_change:+.1f}%"],
-            'Statistical Significance (P-Value)': [f"{p_ttest:.6f}"],
-            'Effect Size (Cohen d)': [f"{cohens_d:.3f}"],
-            'Data Comparison Method': ["2-month period averages for fair comparison"]
-        }
+# Función para crear periodos iguales antes y después
+def create_periods(df, campaign_date, end_date, period_days):
+    # Calcular duración de la campaña
+    campaign_duration = (end_date - campaign_date).days + 1
+    
+    # Calcular número máximo de periodos iguales (máximo 6)
+    max_periods = min(6, campaign_duration // period_days)
+    
+    periods = []
+    
+    # Crear periodos de campaña
+    for i in range(max_periods):
+        start_date = campaign_date + timedelta(days=i*period_days)
+        end_period = min(start_date + timedelta(days=period_days-1), end_date)
         
-        summary_df = pd.DataFrame(summary_data)
-        csv = summary_df.to_csv(index=False)
-        st.download_button(
-            label="Click to Download Summary",
-            data=csv,
-            file_name="alcohol_sales_executive_summary.csv",
-            mime="text/csv"
-        )
-
-with col_export2:
-    if st.button("Download Two-Month Period Data"):
-        export_data = period_data.copy()
-        export_data = export_data[['Period', 'Label', 'Campaign', 'Total_Sales', 'Avg_Sales', 'Transaction_Count']]
-        export_data.columns = ['Period_ID', 'Time_Period', 'Campaign_Status', 'Total_Sales', 'Average_Sale', 'Transaction_Count']
-        csv = export_data.to_csv(index=False)
-        st.download_button(
-            label="Click to Download Period Data",
-            data=csv,
-            file_name="two_month_period_analysis.csv",
-            mime="text/csv"
-        )
-# In the Export Options section (around line 451):
-with col_export3:
-    if st.button("Download Campaign Product Performance"):
-        product_data = df[df['period'] == 'Campaign'].groupby('brand').agg({  # Changed 'Period' to 'period'
-            'sales': ['sum', 'mean', 'count']
-        }).round(2)
+        label = f"Campaña {i+1}"
+        if period_days == 1:
+            label += f": {start_date.strftime('%d/%m')}"
+        else:
+            label += f": {start_date.strftime('%d/%m')}-{end_period.strftime('%d/%m')}"
         
-        product_data.columns = ['Total_Sales', 'Average_Sale', 'Transaction_Count']
-        product_data = product_data.sort_values('Total_Sales', ascending=False)
-        csv = product_data.to_csv()
-        st.download_button(
-            label="Click to Download Product Data",
-            data=csv,
-            file_name="campaign_product_performance.csv",
-            mime="text/csv"
-        )
+        periods.append({
+            'period': f'despues_{i+1}',
+            'start': start_date,
+            'end': end_period,
+            'label': label,
+            'campaign': 'despues'
+        })
+    
+    # Crear periodos antes (mismo número que periodos después)
+    for i in range(max_periods):
+        end_date_before = campaign_date - timedelta(days=1)
+        start_date = end_date_before - timedelta(days=(i+1)*period_days - 1)
+        
+        if start_date < df['date'].min():
+            break
+            
+        label = f"Antes {i+1}"
+        if period_days == 1:
+            label += f": {start_date.strftime('%d/%m')}"
+        else:
+            end_period = start_date + timedelta(days=period_days-1)
+            label += f": {start_date.strftime('%d/%m')}-{end_period.strftime('%d/%m')}"
+        
+        periods.append({
+            'period': f'antes_{i+1}',
+            'start': start_date,
+            'end': start_date + timedelta(days=period_days-1),
+            'label': label,
+            'campaign': 'antes'
+        })
+    
+    # Ordenar cronológicamente
+    periods.sort(key=lambda x: x['start'])
+    
+    # Asignar periodos a los datos
+    df['periodo'] = 'no incluido'
+    df['etiqueta_periodo'] = 'no incluido'
+    df['grupo'] = 'no incluido'
+    
+    for period in periods:
+        mask = (df['date'] >= period['start']) & (df['date'] <= period['end'])
+        df.loc[mask, 'periodo'] = period['period']
+        df.loc[mask, 'etiqueta_periodo'] = period['label']
+        df.loc[mask, 'grupo'] = period['campaign']
+    
+    return df, periods, max_periods
 
-# Final footer
+# Crear periodos
+df, periods, num_periods = create_periods(df, campaign_date, analysis_end_date, comparison_days)
+
+# Análisis comparativo
 st.markdown("---")
-st.write(f"Alcohol Sales Analytics Dashboard | Data Range: {df['date'].min().strftime('%Y-%m-%d')} to {df['date'].max().strftime('%Y-%m-%d')} | "
-         f"Campaign Period: {campaign_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')} (2 months) | "
-         f"Comparison Method: Two-month period averages for fair analysis | "
-         f"Analysis Date: {datetime.now().strftime('%Y-%m-%d')}")
+st.header("Análisis Comparativo: Antes vs Después")
+
+st.write(f"Método de comparación: {num_periods} periodos de {period_option} antes y {num_periods} periodos de {period_option} después")
+
+# Datos para análisis comparativo
+df_periodos = df[df['grupo'] != 'no incluido'].copy()
+
+if len(df_periodos) > 0:
+    # Calcular métricas por periodo
+    period_metrics = df_periodos.groupby(['etiqueta_periodo', 'grupo']).agg({
+        'sales': ['sum', 'mean', 'count']
+    }).round(2).reset_index()
+    
+    period_metrics.columns = ['Periodo', 'Grupo', 'Ventas_Totales', 'Venta_Promedio', 'Transacciones']
+    
+    # Ordenar periodos
+    orden_periodos = []
+    for i in range(num_periods, 0, -1):
+        orden_periodos.append(f'Antes {i}')
+    for i in range(1, num_periods + 1):
+        orden_periodos.append(f'Campaña {i}')
+    
+    period_metrics['Orden'] = pd.Categorical(
+        period_metrics['Periodo'].str.extract(r'(\w+) (\d+)')[0] + ' ' + 
+        period_metrics['Periodo'].str.extract(r'(\w+) (\d+)')[1],
+        categories=orden_periodos,
+        ordered=True
+    )
+    period_metrics = period_metrics.sort_values('Orden')
+    
+    # Gráfico comparativo
+    col7, col8 = st.columns(2)
+    
+    with col7:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        x = np.arange(len(period_metrics))
+        colors = ['steelblue' if g == 'antes' else 'forestgreen' for g in period_metrics['Grupo']]
+        
+        bars = ax.bar(x, period_metrics['Ventas_Totales'], color=colors, alpha=0.7, width=0.6)
+        ax.set_xlabel('Periodo')
+        ax.set_ylabel('Ventas Totales ($)')
+        ax.set_title('Comparación de Ventas por Periodo')
+        ax.set_xticks(x)
+        ax.set_xticklabels(period_metrics['Periodo'], rotation=45, ha='right')
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        # Línea divisoria
+        ax.axvline(x=num_periods-0.5, color='red', linestyle='--', alpha=0.5, linewidth=2)
+        
+        # Etiquetas
+        for bar, val in zip(bars, period_metrics['Ventas_Totales']):
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + max(period_metrics['Ventas_Totales'])*0.01,
+                   f'${val:,.0f}', ha='center', va='bottom', fontsize=9)
+        
+        st.pyplot(fig)
+    
+    with col8:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Separar datos antes y después
+        antes_data = period_metrics[period_metrics['Grupo'] == 'antes']['Venta_Promedio'].values
+        despues_data = period_metrics[period_metrics['Grupo'] == 'despues']['Venta_Promedio'].values
+        
+        x = np.arange(len(antes_data))
+        width = 0.35
+        
+        bars1 = ax.bar(x - width/2, antes_data, width, label='Antes', alpha=0.7, color='steelblue')
+        bars2 = ax.bar(x + width/2, despues_data, width, label='Después', alpha=0.7, color='forestgreen')
+        
+        ax.set_xlabel('Número de Periodo')
+        ax.set_ylabel('Venta Promedio ($)')
+        ax.set_title('Venta Promedio: Antes vs Después')
+        ax.set_xticks(x)
+        ax.set_xticklabels([f'P{i+1}' for i in range(len(antes_data))])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Añadir valores
+        for bars in [bars1, bars2]:
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2, height + max(np.concatenate([antes_data, despues_data]))*0.01,
+                       f'${height:.0f}', ha='center', va='bottom', fontsize=8)
+        
+        st.pyplot(fig)
+    
+    # Análisis estadístico
+    st.subheader("Análisis Estadístico")
+    
+    col9, col10 = st.columns(2)
+    
+    with col9:
+        # Extraer datos para prueba t
+        ventas_antes = df_periodos[df_periodos['grupo'] == 'antes']['sales']
+        ventas_despues = df_periodos[df_periodos['grupo'] == 'despues']['sales']
+        
+        if len(ventas_antes) > 1 and len(ventas_despues) > 1:
+            t_stat, p_valor = ttest_ind(ventas_despues, ventas_antes, equal_var=False)
+            
+            # Tamaño del efecto
+            n1, n2 = len(ventas_despues), len(ventas_antes)
+            pooled_sd = np.sqrt(((n1-1)*ventas_despues.var() + (n2-1)*ventas_antes.var()) / (n1+n2-2))
+            if pooled_sd != 0:
+                cohens_d = (ventas_despues.mean() - ventas_antes.mean()) / pooled_sd
+            else:
+                cohens_d = 0
+            
+            st.metric("Valor p", f"{p_valor:.6f}")
+            st.metric("Significancia", "Significativo" if p_valor < 0.05 else "No significativo")
+            st.metric("Tamaño efecto (d)", f"{cohens_d:.3f}")
+            
+            # Calcular intervalos de confianza
+            def intervalo_confianza(data, confianza=0.95):
+                n = len(data)
+                media = np.mean(data)
+                error = np.std(data, ddof=1) / np.sqrt(n)
+                margen = error * t.ppf((1 + confianza)/2, n-1)
+                return media - margen, media + margen
+            
+            ic_antes = intervalo_confianza(ventas_antes)
+            ic_despues = intervalo_confianza(ventas_despues)
+            
+            st.write("Intervalos 95% confianza:")
+            st.write(f"Antes: ${ic_antes[0]:.2f} - ${ic_antes[1]:.2f}")
+            st.write(f"Después: ${ic_despues[0]:.2f} - ${ic_despues[1]:.2f}")
+    
+    with col10:
+        # Métricas agregadas
+        ventas_totales_antes = df_periodos[df_periodos['grupo'] == 'antes']['sales'].sum()
+        ventas_totales_despues = df_periodos[df_periodos['grupo'] == 'despues']['sales'].sum()
+        
+        promedio_antes = df_periodos[df_periodos['grupo'] == 'antes']['sales'].mean()
+        promedio_despues = df_periodos[df_periodos['grupo'] == 'despues']['sales'].mean()
+        
+        transacciones_antes = len(df_periodos[df_periodos['grupo'] == 'antes'])
+        transacciones_despues = len(df_periodos[df_periodos['grupo'] == 'despues'])
+        
+        cambio_ventas = ((ventas_totales_despues - ventas_totales_antes) / ventas_totales_antes) * 100
+        cambio_promedio = ((promedio_despues - promedio_antes) / promedio_antes) * 100
+        cambio_transacciones = ((transacciones_despues - transacciones_antes) / transacciones_antes) * 100
+        
+        st.write("Métricas Agregadas:")
+        st.write(f"Ventas totales antes: ${ventas_totales_antes:,.0f}")
+        st.write(f"Ventas totales después: ${ventas_totales_despues:,.0f}")
+        st.write(f"Cambio ventas: {cambio_ventas:+.1f}%")
+        
+        st.write(f"Venta promedio antes: ${promedio_antes:.2f}")
+        st.write(f"Venta promedio después: ${promedio_despues:.2f}")
+        st.write(f"Cambio promedio: {cambio_promedio:+.1f}%")
+        
+        st.write(f"Transacciones antes: {transacciones_antes:,}")
+        st.write(f"Transacciones después: {transacciones_despues:,}")
+        st.write(f"Cambio transacciones: {cambio_transacciones:+.1f}%")
+    
+    # Análisis de productos durante campaña
+    st.subheader("Análisis de Productos Durante Campaña")
+    
+    # Mejores productos durante campaña
+    productos_campaña = df_periodos[df_periodos['grupo'] == 'despues']
+    
+    if len(productos_campaña) > 0:
+        # Top productos por crecimiento
+        ventas_antes_por_producto = df_periodos[df_periodos['grupo'] == 'antes'].groupby('brand')['sales'].sum()
+        ventas_despues_por_producto = productos_campaña.groupby('brand')['sales'].sum()
+        
+        crecimiento_productos = pd.DataFrame({
+            'antes': ventas_antes_por_producto,
+            'despues': ventas_despues_por_producto
+        }).fillna(0)
+        
+        crecimiento_productos['cambio'] = ((crecimiento_productos['despues'] - crecimiento_productos['antes']) / 
+                                          crecimiento_productos['antes'].replace(0, np.nan)) * 100
+        crecimiento_productos['cambio'] = crecimiento_productos['cambio'].replace([np.inf, -np.inf], np.nan)
+        
+        # Productos con mayor crecimiento
+        top_crecimiento = crecimiento_productos.dropna().nlargest(10, 'cambio')
+        
+        col11, col12 = st.columns(2)
+        
+        with col11:
+            # Gráfico de mejores productos
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
+            if len(top_crecimiento) > 0:
+                bars = ax.barh(range(len(top_crecimiento)), top_crecimiento['cambio'].values, 
+                              alpha=0.7, color='green')
+                ax.set_yticks(range(len(top_crecimiento)))
+                ax.set_yticklabels(top_crecimiento.index)
+                ax.set_xlabel('Crecimiento (%)')
+                ax.set_title('Top 10 Productos por Crecimiento')
+                ax.grid(True, alpha=0.3, axis='x')
+                
+                for i, (bar, val) in enumerate(zip(bars, top_crecimiento['cambio'].values)):
+                    ax.text(val + 1, bar.get_y() + bar.get_height()/2, 
+                           f'{val:+.1f}%', va='center')
+            
+            st.pyplot(fig)
+        
+        with col12:
+            # Productos con mayores ventas durante campaña
+            top_ventas_campaña = productos_campaña.groupby('brand')['sales'].sum().nlargest(10)
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            bars = ax.barh(range(len(top_ventas_campaña)), top_ventas_campaña.values, 
+                          alpha=0.7, color='darkorange')
+            ax.set_yticks(range(len(top_ventas_campaña)))
+            ax.set_yticklabels(top_ventas_campaña.index)
+            ax.set_xlabel('Ventas Totales ($)')
+            ax.set_title('Top 10 Productos Durante Campaña')
+            ax.grid(True, alpha=0.3, axis='x')
+            
+            for i, (bar, val) in enumerate(zip(bars, top_ventas_campaña.values)):
+                ax.text(val + max(top_ventas_campaña.values)*0.01, bar.get_y() + bar.get_height()/2, 
+                       f'${val:,.0f}', va='center')
+            
+            st.pyplot(fig)
+    
+    # Resumen ejecutivo
+    st.markdown("---")
+    st.header("Resumen Ejecutivo")
+    
+    col13, col14 = st.columns(2)
+    
+    with col13:
+        st.write("Resultados Clave:")
+        
+        conclusiones = []
+        
+        if p_valor < 0.05:
+            if cambio_ventas > 0:
+                conclusiones.append(f"Impacto positivo significativo: La campaña aumentó ventas en {cambio_ventas:+.1f}%")
+            else:
+                conclusiones.append(f"Impacto negativo significativo: La campaña redujo ventas en {abs(cambio_ventas):.1f}%")
+        else:
+            conclusiones.append("Sin impacto significativo: No hay evidencia estadística de cambio")
+        
+        if cambio_promedio > 10:
+            conclusiones.append(f"Aumento en ticket promedio: Los clientes gastan {cambio_promedio:+.1f}% más por transacción")
+        
+        if cambio_transacciones > 10:
+            conclusiones.append(f"Más transacciones: Volumen aumentó {cambio_transacciones:+.1f}%")
+        
+        if len(productos_campaña) > 0:
+            mejor_producto = top_crecimiento.index[0] if len(top_crecimiento) > 0 else "N/A"
+            if len(top_crecimiento) > 0:
+                mejor_crecimiento = top_crecimiento['cambio'].iloc[0]
+                conclusiones.append(f"Producto estrella: {mejor_producto} creció {mejor_crecimiento:+.1f}%")
+        
+        for conclusion in conclusiones:
+            st.write(f"• {conclusion}")
+    
+    with col14:
+        st.write("Recomendaciones:")
+        
+        recomendaciones = []
+        
+        if p_valor < 0.05 and cambio_ventas > 0:
+            recomendaciones.append("Continuar campaña: Los resultados justifican continuar")
+            recomendaciones.append("Optimizar elementos exitosos: Identificar qué funcionó mejor")
+            recomendaciones.append("Expandir a otros productos: Aplicar estrategias similares")
+        elif p_valor < 0.05 and cambio_ventas < 0:
+            recomendaciones.append("Reevaluar estrategia: Revisar elementos de la campaña")
+            recomendaciones.append("Realizar investigación: Entender por qué no funcionó")
+            recomendaciones.append("Probar nuevos enfoques: Experimentar con diferentes tácticas")
+        else:
+            recomendaciones.append("Ampliar periodo de prueba: Dar más tiempo para ver efectos")
+            recomendaciones.append("Aumentar presupuesto: Incrementar alcance de la campaña")
+            recomendaciones.append("Segmentar mejor: Enfocarse en clientes más receptivos")
+        
+        for i, recomendacion in enumerate(recomendaciones, 1):
+            st.write(f"{i}. {recomendacion}")
+
+else:
+    st.warning("No hay suficientes datos para el análisis comparativo")
+
+# Pie de página
+st.markdown("---")
+st.write(f"Análisis completado: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
