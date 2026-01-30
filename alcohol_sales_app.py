@@ -33,7 +33,7 @@ df = load_data()
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.markdown("###**Filtros de Fecha**")
+    st.markdown("**Filtros de Fecha**")
     min_date = df['date'].min().date()
     max_date = df['date'].max().date()
     
@@ -442,3 +442,4 @@ with col_res2:
 # Pie de página
 st.markdown("---")
 st.markdown("*Última actualización: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + "*")
+
