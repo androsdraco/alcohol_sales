@@ -24,7 +24,7 @@ def load_data():
     df['sales'] = df['sales'].str.replace('$', '', regex=False)
     df['sales'] = df['sales'].str.replace(',', '', regex=False)
     df['sales'] = df['sales'].astype(float)
-    df['date'] = pd.to_datetime(df['date'])
+    df['date'] = pd.to_datetime(df['date'], dayfirst=True)
     return df
 
 df = load_data()
@@ -116,7 +116,7 @@ if analisis_completo:
 
 # Análisis de valores faltantes
 st.markdown("---")
-st.subheader("**Anális de Valores Faltantes**")
+st.subheader("**Análisis de Valores Faltantes**")
 
 resumen_faltantes = pd.DataFrame({
     'Cantidad_Faltantes': df_filtrado.isnull().sum(),
@@ -349,7 +349,6 @@ st.markdown("---")
 st.subheader("🔗 **Análisis de Correlaciones**")
 
 if len(df_filtrado) > 1:
-    # Crear variables numéricas para correlación
     df_corr = df_filtrado.copy()
     
     # Codificar variables categóricas
@@ -442,4 +441,3 @@ with col_res2:
 # Pie de página
 st.markdown("---")
 st.markdown("*Última actualización: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + "*")
-
