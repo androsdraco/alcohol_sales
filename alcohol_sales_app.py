@@ -4,10 +4,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import skew, kurtosis, ttest_ind, mannwhitneyu, sem, t, pointbiserialr
-import statsmodels.api as sm
-from statsmodels.formula.api import ols
 import warnings
 warnings.filterwarnings('ignore')
+
+# Intento de importar statsmodels
+try:
+    import statsmodels.api as sm
+    from statsmodels.formula.api import ols
+    STATSMODELS_AVAILABLE = True
+except ImportError:
+    STATSMODELS_AVAILABLE = False
+    st.warning("El paquete 'statsmodels' no está instalado. La prueba de interacción por marca no estará disponible. Para instalarlo, añade 'statsmodels' a tu archivo requirements.txt.")
 
 # Configuración de la página
 st.set_page_config(
@@ -213,28 +220,10 @@ Cat_cols = ['brand', 'Campaign', 'month', 'estacion']
 Num_cols = ['sales', 'dia_semana']
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE IMPACTO DE CAMPAÑA (MEJORADO)
+# ANÁLISIS DE IMPACTO DE CAMPAÑA
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Análisis de Impacto de Campaña**")
-
-# Nota aclaratoria sobre la independencia de las muestras y la limitación del análisis univariante
-with st.expander("⚠️ Limitaciones del análisis y consideraciones metodológicas"):
-    st.markdown("""
-    **Independencia de las muestras**  
-    Aunque las ventas antes y después de la campaña provienen de las mismas marcas, **cada registro es una transacción independiente** (diferente día, diferente combinación de productos). No existe un emparejamiento natural entre las observaciones individuales de ambos periodos. Por lo tanto, las muestras se consideran **independientes** para efectos del análisis estadístico.
-
-    La prueba t de Welch (para muestras independientes con varianzas desiguales) y la prueba U de Mann‑Whitney son las adecuadas en este contexto. En caso de que se dispusiera de un panel de datos con los mismos puntos de venta medidos en los mismos días antes y después, se podría utilizar una prueba pareada, pero ese no es el caso aquí.
-
-    **Limitación del análisis univariante**  
-    Este análisis se basa exclusivamente en la variable `sales`. No se han incluido otras variables que podrían influir en las ventas, como:
-    - Actividades promocionales simultáneas
-    - Cambios en el entorno económico
-    - Acciones de la competencia
-    - Eventos externos (festividades, clima, etc.)
-
-    Por lo tanto, **los resultados muestran una asociación estadística entre el periodo posterior a la campaña y un incremento en las ventas, pero no prueban causalidad**. Para establecer una relación causal más sólida sería necesario utilizar métodos como diferencias en diferencias, modelos de series temporales con variables de control, o experimentos controlados (grupo de control no expuesto a la campaña).
-    """)
 
 campaign_stats = df_filtrado.groupby('Campaign')['sales'].agg([
     'count', 'sum', 'mean', 'median', 'std', 'min', 'max'
@@ -279,11 +268,11 @@ with col_camp2:
             r_pb, p_pb = pointbiserialr(binary, all_sales)
             
             st.markdown("**Pruebas Estadísticas y Tamaño del Efecto:**")
-            st.write(f"**Prueba t (Welch):** t = {t_stat:.3f}, p = {p_value_t:.4f}")
             st.write(f"**Mann-Whitney U:** p = {p_value_u:.4f}")
             st.write(f"**d de Cohen:** {cohen_d:.3f} (interpretación: {'pequeño' if abs(cohen_d)<0.2 else 'medio' if abs(cohen_d)<0.5 else 'grande'})")
             st.write(f"**Correlación punto-biserial:** {r_pb:.3f} (p = {p_pb:.4f})")
             
+            # Usamos el p-valor del t-test para decidir éxito
             if p_value_t < 0.05:
                 if despues_mean > antes_mean:
                     st.success("✅ La campaña parece EXITOSA (diferencia significativa)")
@@ -295,7 +284,7 @@ with col_camp2:
         st.warning("No hay suficientes datos para ambos periodos de campaña")
 
 # -------------------------------------------------------------------
-# VISUALIZACIONES DE CAMPAÑA (incluyendo gráfico de dispersión temporal)
+# VISUALIZACIONES DE CAMPAÑA
 # -------------------------------------------------------------------
 if crear_visualizaciones and len(df_filtrado) > 0:
     st.markdown("**Visualizaciones de Impacto de Campaña:**")
@@ -326,7 +315,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     plt.tight_layout()
     st.pyplot(fig)
 
-    # Gráfico de dispersión (ventas a lo largo del tiempo, coloreado por campaña)
+    # Gráfico de dispersión
     fig, ax = plt.subplots(figsize=(12, 5))
     colors = {'Antes': '#1f77b4', 'Después': '#ff7f0e'}
     for camp in ['Antes', 'Después']:
@@ -341,7 +330,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS POR MARCA (MEJORADO)
+# ANÁLISIS POR MARCA
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Análisis por Marca**")
@@ -403,7 +392,7 @@ plt.xticks(rotation=45)
 st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# HETEROGENEIDAD DEL IMPACTO POR MARCA (NUEVO)
+# HETEROGENEIDAD DEL IMPACTO POR MARCA
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Heterogeneidad del Impacto por Marca**")
@@ -434,7 +423,7 @@ with col_imp2:
 st.markdown("**¿Es estadísticamente significativa la diferencia en el impacto entre marcas?**")
 st.markdown("Se ajusta un modelo de regresión lineal con `sales` como variable dependiente y `brand`, `Campaign` y su interacción como predictores. El p‑valor del término de interacción indica si el efecto de la campaña varía significativamente entre marcas.")
 
-if len(df_filtrado) > 0:
+if STATSMODELS_AVAILABLE and len(df_filtrado) > 0:
     # Preparar datos: codificar variables categóricas
     df_model = df_filtrado.copy()
     df_model['Campaign_num'] = (df_model['Campaign'] == 'Después').astype(int)
@@ -454,7 +443,10 @@ if len(df_filtrado) > 0:
     except Exception as e:
         st.error("No se pudo ajustar el modelo de interacción (posiblemente debido a datos insuficientes).")
 else:
-    st.info("No hay datos suficientes para el análisis de interacción.")
+    if not STATSMODELS_AVAILABLE:
+        st.info("La prueba de interacción requiere el paquete 'statsmodels'. Por favor, instálalo (añádelo a requirements.txt) para ver este análisis.")
+    else:
+        st.info("No hay datos suficientes para el análisis de interacción.")
 
 # -------------------------------------------------------------------
 # ANÁLISIS ESTACIONAL
@@ -505,7 +497,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE CORRELACIONES (REFINADO)
+# ANÁLISIS DE CORRELACIONES
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("🔗 **Análisis de Correlaciones**")
@@ -546,7 +538,7 @@ if len(df_filtrado) > 1:
         st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# RESUMEN EJECUTIVO (ACTUALIZADO CON HALLAZGOS DEL TFM)
+# RESUMEN EJECUTIVO
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Resumen Ejecutivo**")
@@ -554,13 +546,11 @@ st.subheader("**Resumen Ejecutivo**")
 col_res1, col_res2 = st.columns(2)
 
 # Para el resumen necesitamos las métricas de campaña ya calculadas
-# Las recuperamos del bloque anterior (si existen)
 if 'antes_sales' in locals() and 'despues_sales' in locals():
     antes_mean = antes_sales.mean()
     despues_mean = despues_sales.mean()
     antes_median = antes_sales.median()
     despues_median = despues_sales.median()
-    t_stat, p_value_t = ttest_ind(despues_sales, antes_sales, equal_var=False)
     n1, n2 = len(antes_sales), len(despues_sales)
     var1, var2 = antes_sales.var(), despues_sales.var()
     pooled_std = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2))
@@ -577,7 +567,6 @@ else:
         despues_mean = despues_sales.mean()
         antes_median = antes_sales.median()
         despues_median = despues_sales.median()
-        # (Se podrían calcular el resto, pero simplificamos)
         cohen_d = np.nan
         r_pb = np.nan
     else:
@@ -589,7 +578,6 @@ with col_res1:
     if not np.isnan(antes_mean) and not np.isnan(despues_mean):
         st.write(f"• **Venta promedio antes:** ${antes_mean:,.2f} | después: ${despues_mean:,.2f}  →  **+{(despues_mean-antes_mean)/antes_mean*100:+.1f}%**")
         st.write(f"• **Mediana antes:** ${antes_median:,.2f} | después: ${despues_median:,.2f}  →  **+{(despues_median-antes_median)/antes_median*100:+.1f}%**")
-    st.write(f"• **Prueba t (Welch):** p < 0.05 (estadísticamente significativo)")
     if not np.isnan(cohen_d):
         st.write(f"• **Tamaño del efecto (d de Cohen):** {cohen_d:.3f} (pequeño)")
     if not np.isnan(r_pb):
