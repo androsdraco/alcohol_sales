@@ -216,6 +216,14 @@ Num_cols = ['sales', 'dia_semana']
 st.markdown("---")
 st.subheader("**Análisis de Impacto de Campaña**")
 
+# Nota aclaratoria sobre la independencia de las muestras
+with st.expander("Nota sobre la elección de la prueba estadística"):
+    st.markdown("""
+    Aunque las ventas antes y después de la campaña provienen de las mismas marcas, **cada registro es una transacción independiente** (diferente día, diferente combinación de productos). No existe un emparejamiento natural entre las observaciones individuales de ambos periodos. Por lo tanto, las muestras se consideran **independientes** para efectos del análisis estadístico.
+
+    La prueba t de Welch (para muestras independientes con varianzas desiguales) y la prueba U de Mann‑Whitney son las adecuadas en este contexto. En caso de que se dispusiera de un panel de datos con los mismos puntos de venta medidos en los mismos días antes y después, se podría utilizar una prueba pareada, pero ese no es el caso aquí.
+    """)
+
 campaign_stats = df_filtrado.groupby('Campaign')['sales'].agg([
     'count', 'sum', 'mean', 'median', 'std', 'min', 'max'
 ]).round(2)
