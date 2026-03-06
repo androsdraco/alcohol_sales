@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import skew, kurtosis, ttest_ind, mannwhitneyu, sem, t, pointbiserialr
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -216,12 +218,22 @@ Num_cols = ['sales', 'dia_semana']
 st.markdown("---")
 st.subheader("**Análisis de Impacto de Campaña**")
 
-# Nota aclaratoria sobre la independencia de las muestras
-with st.expander("Nota sobre la elección de la prueba estadística"):
+# Nota aclaratoria sobre la independencia de las muestras y la limitación del análisis univariante
+with st.expander("⚠️ Limitaciones del análisis y consideraciones metodológicas"):
     st.markdown("""
+    **Independencia de las muestras**  
     Aunque las ventas antes y después de la campaña provienen de las mismas marcas, **cada registro es una transacción independiente** (diferente día, diferente combinación de productos). No existe un emparejamiento natural entre las observaciones individuales de ambos periodos. Por lo tanto, las muestras se consideran **independientes** para efectos del análisis estadístico.
 
     La prueba t de Welch (para muestras independientes con varianzas desiguales) y la prueba U de Mann‑Whitney son las adecuadas en este contexto. En caso de que se dispusiera de un panel de datos con los mismos puntos de venta medidos en los mismos días antes y después, se podría utilizar una prueba pareada, pero ese no es el caso aquí.
+
+    **Limitación del análisis univariante**  
+    Este análisis se basa exclusivamente en la variable `sales`. No se han incluido otras variables que podrían influir en las ventas, como:
+    - Actividades promocionales simultáneas
+    - Cambios en el entorno económico
+    - Acciones de la competencia
+    - Eventos externos (festividades, clima, etc.)
+
+    Por lo tanto, **los resultados muestran una asociación estadística entre el periodo posterior a la campaña y un incremento en las ventas, pero no prueban causalidad**. Para establecer una relación causal más sólida sería necesario utilizar métodos como diferencias en diferencias, modelos de series temporales con variables de control, o experimentos controlados (grupo de control no expuesto a la campaña).
     """)
 
 campaign_stats = df_filtrado.groupby('Campaign')['sales'].agg([
@@ -391,6 +403,60 @@ plt.xticks(rotation=45)
 st.pyplot(fig)
 
 # -------------------------------------------------------------------
+# HETEROGENEIDAD DEL IMPACTO POR MARCA (NUEVO)
+# -------------------------------------------------------------------
+st.markdown("---")
+st.subheader("**Heterogeneidad del Impacto por Marca**")
+st.markdown("La campaña publicitaria puede haber afectado de manera diferente a cada marca. A continuación se muestra el cambio porcentual en las ventas promedio para cada marca (antes vs. después de la campaña).")
+
+# Calcular cambio porcentual por marca
+brand_impact = df_filtrado.groupby(['brand', 'Campaign'])['sales'].mean().unstack()
+brand_impact['pct_change'] = ((brand_impact['Después'] - brand_impact['Antes']) / brand_impact['Antes']) * 100
+brand_impact = brand_impact.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
+
+# Mostrar tabla y gráfico
+col_imp1, col_imp2 = st.columns(2)
+
+with col_imp1:
+    st.markdown("**Cambio porcentual por marca:**")
+    st.dataframe(brand_impact[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
+
+with col_imp2:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in brand_impact['pct_change']]
+    ax.barh(brand_impact.index, brand_impact['pct_change'], color=colors)
+    ax.axvline(0, color='black', linewidth=0.8)
+    ax.set_xlabel('Cambio porcentual (%)')
+    ax.set_title('Impacto de la campaña por marca')
+    st.pyplot(fig)
+
+# Prueba de interacción (modelo lineal con interacción)
+st.markdown("**¿Es estadísticamente significativa la diferencia en el impacto entre marcas?**")
+st.markdown("Se ajusta un modelo de regresión lineal con `sales` como variable dependiente y `brand`, `Campaign` y su interacción como predictores. El p‑valor del término de interacción indica si el efecto de la campaña varía significativamente entre marcas.")
+
+if len(df_filtrado) > 0:
+    # Preparar datos: codificar variables categóricas
+    df_model = df_filtrado.copy()
+    df_model['Campaign_num'] = (df_model['Campaign'] == 'Después').astype(int)
+    
+    # Usar statsmodels para OLS con interacción
+    formula = 'sales ~ C(brand) * Campaign_num'
+    try:
+        model = ols(formula, data=df_model).fit()
+        anova_table = sm.stats.anova_lm(model, typ=2)
+        interaction_p = anova_table.loc['C(brand):Campaign_num', 'PR(>F)']
+        
+        st.write(f"**p‑valor de la interacción (brand × campaign):** {interaction_p:.4f}")
+        if interaction_p < 0.05:
+            st.success("La interacción es significativa → el efecto de la campaña varía entre marcas.")
+        else:
+            st.warning("La interacción no es significativa → no hay evidencia de que el impacto difiera entre marcas.")
+    except Exception as e:
+        st.error("No se pudo ajustar el modelo de interacción (posiblemente debido a datos insuficientes).")
+else:
+    st.info("No hay datos suficientes para el análisis de interacción.")
+
+# -------------------------------------------------------------------
 # ANÁLISIS ESTACIONAL
 # -------------------------------------------------------------------
 st.markdown("---")
@@ -550,6 +616,7 @@ with col_res2:
     mejor_estacion = df_filtrado.groupby('estacion')['sales'].mean().idxmax()
     st.write(f"• **Enfoque estacional:** intensificar esfuerzos en {mejor_estacion}.")
     st.write("• Se recomienda diseñar estrategias **segmentadas por marca** para optimizar futuras campañas.")
+    st.caption("Nota: Estos resultados reflejan asociaciones, no causalidad. Factores externos no controlados pueden influir en las ventas. Además, el dataset no contiene información geográfica (solo se sabe que la campaña se realizó en EE.UU.), por lo que no es posible analizar diferencias regionales.")
 
 # Pie de página
 st.markdown("---")
