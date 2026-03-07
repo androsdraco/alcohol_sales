@@ -223,9 +223,10 @@ with col_attr3:
 if crear_visualizaciones:
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     
-    # Gráfico de barras para líneas de producto
+    # Gráfico de barras para líneas de producto (usar YlOrBr)
     top_lines = line_counts.head(10)
-    axes[0].bar(top_lines.index, top_lines.values, color='skyblue')
+    colors_lines = plt.cm.YlOrBr(np.linspace(0.3, 0.9, len(top_lines)))
+    axes[0].bar(top_lines.index, top_lines.values, color=colors_lines)
     axes[0].set_title('Top 10 Líneas de Producto')
     axes[0].set_xlabel('Línea')
     axes[0].set_ylabel('Frecuencia')
@@ -233,13 +234,14 @@ if crear_visualizaciones:
     
     # Histograma de tamaños
     sizes = df_filtrado['size'].dropna()
-    axes[1].hist(sizes, bins=20, color='lightgreen', edgecolor='black')
+    axes[1].hist(sizes, bins=20, color=plt.cm.YlOrBr(0.6), edgecolor='black')
     axes[1].set_title('Distribución de Tamaños')
     axes[1].set_xlabel('Tamaño (unidades)')
     axes[1].set_ylabel('Frecuencia')
     
     # Gráfico de barras para presentaciones
-    pres_counts.plot(kind='bar', ax=axes[2], color=['#ff9999','#66b3ff'])
+    pres_colors = plt.cm.YlOrBr([0.4, 0.7])  # dos tonos
+    pres_counts.plot(kind='bar', ax=axes[2], color=pres_colors)
     axes[2].set_title('Distribución de Presentaciones')
     axes[2].set_xlabel('Presentación')
     axes[2].set_ylabel('Frecuencia')
@@ -338,27 +340,27 @@ with col_camp2:
         st.warning("No hay suficientes datos para ambos periodos de campaña")
 
 # -------------------------------------------------------------------
-# VISUALIZACIONES DE CAMPAÑA (GLOBALES)
+# VISUALIZACIONES DE CAMPAÑA (GLOBALES) - CON PALETA YlOrBr
 # -------------------------------------------------------------------
 if crear_visualizaciones and len(df_filtrado) > 0:
     st.markdown("**Visualizaciones de Impacto de Campaña:**")
     
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     
-    # Boxplot
-    sns.boxplot(data=df_filtrado, x='Campaign', y='sales', ax=axes[0])
+    # Boxplot con paleta YlOrBr
+    sns.boxplot(data=df_filtrado, x='Campaign', y='sales', ax=axes[0], palette="YlOrBr")
     axes[0].set_title('Distribución de Ventas por Campaña')
     axes[0].set_ylabel('Ventas ($)')
     
-    # Violin plot
-    sns.violinplot(data=df_filtrado, x='Campaign', y='sales', ax=axes[1])
+    # Violin plot con paleta YlOrBr
+    sns.violinplot(data=df_filtrado, x='Campaign', y='sales', ax=axes[1], palette="YlOrBr")
     axes[1].set_title('Distribución Detallada por Campaña')
     axes[1].set_ylabel('Ventas ($)')
     
-    # Gráfico de barras
+    # Gráfico de barras con dos tonos de YlOrBr
     campaign_means = df_filtrado.groupby('Campaign')['sales'].mean()
-    colors = ['#FF6B6B', '#4ECDC4']
-    axes[2].bar(campaign_means.index, campaign_means.values, color=colors)
+    colors_bar = plt.cm.YlOrBr([0.3, 0.7])  # claro para Antes, oscuro para Después
+    axes[2].bar(campaign_means.index, campaign_means.values, color=colors_bar)
     axes[2].set_title('Ventas Promedio por Campaña')
     axes[2].set_ylabel('Ventas Promedio ($)')
     axes[2].set_ylim(0, campaign_means.max() * 1.2)
@@ -369,13 +371,14 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     plt.tight_layout()
     st.pyplot(fig)
 
-    # Gráfico de dispersión temporal
+    # Gráfico de dispersión temporal con colores YlOrBr
     fig, ax = plt.subplots(figsize=(12, 5))
-    colors = {'Antes': '#1f77b4', 'Después': '#ff7f0e'}
+    # Usar dos tonos de YlOrBr para antes y después
+    colors_scatter = {'Antes': plt.cm.YlOrBr(0.3), 'Después': plt.cm.YlOrBr(0.7)}
     for camp in ['Antes', 'Después']:
         subset = df_filtrado[df_filtrado['Campaign'] == camp]
         ax.scatter(subset['date'], subset['sales'], 
-                   c=colors[camp], label=camp, alpha=0.6, s=10)
+                   c=colors_scatter[camp], label=camp, alpha=0.6, s=10)
     ax.set_title('Ventas Diarias a lo Largo del Tiempo')
     ax.set_xlabel('Fecha')
     ax.set_ylabel('Ventas ($)')
@@ -398,7 +401,8 @@ def plot_impact_by_category(df, group_col, group_name):
         st.dataframe(stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
         
         fig, ax = plt.subplots(figsize=(10, 6))
-        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in stats['pct_change']]
+        # Usar YlOrBr: positivo más oscuro, negativo más claro
+        colors = [plt.cm.YlOrBr(0.7) if x > 0 else plt.cm.YlOrBr(0.3) for x in stats['pct_change']]
         ax.barh(stats.index, stats['pct_change'], color=colors)
         ax.axvline(0, color='black', linewidth=0.8)
         ax.set_xlabel('Cambio porcentual (%)')
@@ -494,7 +498,8 @@ with col_imp1:
 with col_imp2:
     fig, ax = plt.subplots(figsize=(10, 8))
     labels = brand_impact.index
-    colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in brand_impact['pct_change']]
+    # Usar YlOrBr: positivo más oscuro, negativo más claro
+    colors = [plt.cm.YlOrBr(0.7) if x > 0 else plt.cm.YlOrBr(0.3) for x in brand_impact['pct_change']]
     y_pos = range(len(brand_impact))
     ax.barh(y_pos, brand_impact['pct_change'], color=colors)
     ax.set_yticks(y_pos)
@@ -532,7 +537,7 @@ else:
         st.info("No hay datos suficientes para el análisis de interacción.")
 
 # -------------------------------------------------------------------
-# ANÁLISIS ESTACIONAL
+# ANÁLISIS ESTACIONAL (CON PALETA YlOrBr)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Análisis Estacional**")
@@ -558,16 +563,19 @@ with col_est2:
 if crear_visualizaciones and len(df_filtrado) > 0:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
+    # Ventas por estación con tonos de YlOrBr
     estacion_order = ['Invierno', 'Primavera', 'Verano', 'Otoño']
     estacion_data = df_filtrado.groupby('estacion')['sales'].sum()
     estacion_data = estacion_data.reindex(estacion_order, fill_value=0)
-    axes[0].bar(estacion_data.index, estacion_data.values, color=['#3498db', '#2ecc71', '#e74c3c', '#f39c12'])
+    colors_est = plt.cm.YlOrBr(np.linspace(0.3, 0.9, 4))
+    axes[0].bar(estacion_data.index, estacion_data.values, color=colors_est)
     axes[0].set_title('Ventas Totales por Estación')
     axes[0].set_ylabel('Ventas Totales ($)')
     axes[0].tick_params(axis='x', rotation=45)
     
+    # Ventas por mes con línea YlOrBr
     mes_data = df_filtrado.groupby('month')['sales'].mean().sort_index()
-    axes[1].plot(mes_data.index, mes_data.values, marker='o', color='#9b59b6', linewidth=2)
+    axes[1].plot(mes_data.index, mes_data.values, marker='o', color=plt.cm.YlOrBr(0.6), linewidth=2)
     axes[1].set_title('Ventas Promedio por Mes')
     axes[1].set_xlabel('Mes')
     axes[1].set_ylabel('Ventas Promedio ($)')
@@ -578,7 +586,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE CORRELACIONES (SIN HEATMAP, CON PALETA YlOrBr)
+# ANÁLISIS DE CORRELACIONES (CON PALETA YlOrBr)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("🔗 **Análisis de Correlaciones**")
@@ -606,7 +614,7 @@ if len(df_filtrado) > 1:
     
     with col_corr1:
         st.markdown("**Matriz de Correlación:**")
-        # Usar la paleta YlOrBr para el gradiente de fondo
+        # Gradiente con YlOrBr
         st.dataframe(correlation_matrix.style.background_gradient(cmap='YlOrBr', vmin=-1, vmax=1), 
                     use_container_width=True)
     
