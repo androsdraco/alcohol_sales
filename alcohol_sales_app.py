@@ -27,7 +27,7 @@ st.title("**Análisis de Ventas de Alcohol**")
 st.markdown("---")
 
 # -------------------------------------------------------------------
-# CARGA DE DATOS (VERSIÓN ENRIQUECIDA)
+# CARGA DE DATOS
 # -------------------------------------------------------------------
 @st.cache_data
 def load_data():
@@ -74,7 +74,6 @@ with col1:
 
 with col2:
     st.markdown("### **Configuración de Campaña**")
-    # Fecha de campaña actualizada a 2023-08-01
     fecha_campania = st.date_input(
         "Fecha de inicio de campaña",
         value=pd.Timestamp('2023-08-01').date(),
@@ -198,7 +197,7 @@ with col_uni3:
     st.caption(f"Límites: [${lower_bound:,.2f}, ${upper_bound:,.2f}]")
 
 # -------------------------------------------------------------------
-# ANÁLISIS UNIVARIANTE DE ATRIBUTOS DE PRODUCTO
+# ANÁLISIS UNIVARIANTE DE ATRIBUTOS
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Distribución de Atributos de Producto**")
@@ -239,8 +238,8 @@ if crear_visualizaciones:
     axes[1].set_xlabel('Tamaño (unidades)')
     axes[1].set_ylabel('Frecuencia')
     
-    # Gráfico de barras para presentaciones
-    pres_colors = plt.cm.YlOrBr([0.4, 0.7])  # dos tonos
+    # Gráfico de barras 
+    pres_colors = plt.cm.YlOrBr([0.4, 0.7])  
     pres_counts.plot(kind='bar', ax=axes[2], color=pres_colors)
     axes[2].set_title('Distribución de Presentaciones')
     axes[2].set_xlabel('Presentación')
@@ -251,7 +250,7 @@ if crear_visualizaciones:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# CREACIÓN DE VARIABLES TEMPORALES Y DE CAMPAÑA
+# CREACIÓN DE VARIABLES TEMPORALES
 # -------------------------------------------------------------------
 df_filtrado['month'] = df_filtrado['date'].dt.month
 
@@ -277,7 +276,7 @@ df_filtrado['Campaign'] = np.where(
 )
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE IMPACTO DE CAMPAÑA (GLOBAL)
+# ANÁLISIS DE IMPACTO DE CAMPAÑA 
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Análisis de Impacto de Campaña**")
@@ -340,26 +339,26 @@ with col_camp2:
         st.warning("No hay suficientes datos para ambos periodos de campaña")
 
 # -------------------------------------------------------------------
-# VISUALIZACIONES DE CAMPAÑA (GLOBALES) - CON PALETA YlOrBr
+# VISUALIZACIONES DE CAMPAÑA (GLOBALES) 
 # -------------------------------------------------------------------
 if crear_visualizaciones and len(df_filtrado) > 0:
     st.markdown("**Visualizaciones de Impacto de Campaña:**")
     
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
     
-    # Boxplot con paleta YlOrBr
+    # Boxplot
     sns.boxplot(data=df_filtrado, x='Campaign', y='sales', ax=axes[0], palette="YlOrBr")
     axes[0].set_title('Distribución de Ventas por Campaña')
     axes[0].set_ylabel('Ventas ($)')
     
-    # Violin plot con paleta YlOrBr
+    # Violin plot 
     sns.violinplot(data=df_filtrado, x='Campaign', y='sales', ax=axes[1], palette="YlOrBr")
     axes[1].set_title('Distribución Detallada por Campaña')
     axes[1].set_ylabel('Ventas ($)')
     
-    # Gráfico de barras con dos tonos de YlOrBr
+    # Gráfico de barras
     campaign_means = df_filtrado.groupby('Campaign')['sales'].mean()
-    colors_bar = plt.cm.YlOrBr([0.3, 0.7])  # claro para Antes, oscuro para Después
+    colors_bar = plt.cm.YlOrBr([0.3, 0.7])  
     axes[2].bar(campaign_means.index, campaign_means.values, color=colors_bar)
     axes[2].set_title('Ventas Promedio por Campaña')
     axes[2].set_ylabel('Ventas Promedio ($)')
@@ -371,9 +370,8 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     plt.tight_layout()
     st.pyplot(fig)
 
-    # Gráfico de dispersión temporal con colores YlOrBr
+    # Gráfico de dispersión temporal
     fig, ax = plt.subplots(figsize=(12, 5))
-    # Usar dos tonos de YlOrBr para antes y después
     colors_scatter = {'Antes': plt.cm.YlOrBr(0.3), 'Después': plt.cm.YlOrBr(0.7)}
     for camp in ['Antes', 'Después']:
         subset = df_filtrado[df_filtrado['Campaign'] == camp]
@@ -401,7 +399,6 @@ def plot_impact_by_category(df, group_col, group_name):
         st.dataframe(stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
         
         fig, ax = plt.subplots(figsize=(10, 6))
-        # Usar YlOrBr: positivo más oscuro, negativo más claro
         colors = [plt.cm.YlOrBr(0.7) if x > 0 else plt.cm.YlOrBr(0.3) for x in stats['pct_change']]
         ax.barh(stats.index, stats['pct_change'], color=colors)
         ax.axvline(0, color='black', linewidth=0.8)
@@ -498,7 +495,6 @@ with col_imp1:
 with col_imp2:
     fig, ax = plt.subplots(figsize=(10, 8))
     labels = brand_impact.index
-    # Usar YlOrBr: positivo más oscuro, negativo más claro
     colors = [plt.cm.YlOrBr(0.7) if x > 0 else plt.cm.YlOrBr(0.3) for x in brand_impact['pct_change']]
     y_pos = range(len(brand_impact))
     ax.barh(y_pos, brand_impact['pct_change'], color=colors)
@@ -509,7 +505,6 @@ with col_imp2:
     ax.set_title('Impacto de la campaña por producto')
     st.pyplot(fig)
 
-# Prueba de interacción (si statsmodels está disponible)
 st.markdown("**¿Es estadísticamente significativa la diferencia en el impacto entre productos?**")
 st.markdown("Se ajusta un modelo de regresión lineal con `sales` como variable dependiente y `brand`, `Campaign` y su interacción como predictores. El p‑valor del término de interacción indica si el efecto de la campaña varía significativamente entre productos.")
 
@@ -537,7 +532,7 @@ else:
         st.info("No hay datos suficientes para el análisis de interacción.")
 
 # -------------------------------------------------------------------
-# ANÁLISIS ESTACIONAL (CON PALETA YlOrBr)
+# ANÁLISIS ESTACIONAL
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Análisis Estacional**")
@@ -563,7 +558,7 @@ with col_est2:
 if crear_visualizaciones and len(df_filtrado) > 0:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
-    # Ventas por estación con tonos de YlOrBr
+    # Ventas por estación
     estacion_order = ['Invierno', 'Primavera', 'Verano', 'Otoño']
     estacion_data = df_filtrado.groupby('estacion')['sales'].sum()
     estacion_data = estacion_data.reindex(estacion_order, fill_value=0)
@@ -573,7 +568,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     axes[0].set_ylabel('Ventas Totales ($)')
     axes[0].tick_params(axis='x', rotation=45)
     
-    # Ventas por mes con línea YlOrBr
+    # Ventas por mes
     mes_data = df_filtrado.groupby('month')['sales'].mean().sort_index()
     axes[1].plot(mes_data.index, mes_data.values, marker='o', color=plt.cm.YlOrBr(0.6), linewidth=2)
     axes[1].set_title('Ventas Promedio por Mes')
@@ -586,10 +581,10 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE CORRELACIONES (CON PALETA YlOrBr)
+# ANÁLISIS DE CORRELACIONES
 # -------------------------------------------------------------------
 st.markdown("---")
-st.subheader("🔗 **Análisis de Correlaciones**")
+st.subheader("Análisis de Correlaciones")
 
 if len(df_filtrado) > 1:
     df_corr = df_filtrado.copy()
@@ -613,27 +608,25 @@ if len(df_filtrado) > 1:
     col_corr1, col_corr2 = st.columns(2)
     
     with col_corr1:
-        st.markdown("**Matriz de Correlación:**")
-        # Gradiente con YlOrBr
+        st.markdown("Matriz de Correlación:")
         st.dataframe(correlation_matrix.style.background_gradient(cmap='YlOrBr', vmin=-1, vmax=1), 
                     use_container_width=True)
     
     with col_corr2:
-        st.markdown("**Correlaciones con Ventas:**")
+        st.markdown("Correlaciones con Ventas:")
         sales_corr = correlation_matrix['sales'].sort_values(ascending=False)
         for variable, corr in sales_corr.items():
             if variable != 'sales':
                 st.write(f"**{variable}:** {corr:.3f}")
 
 # -------------------------------------------------------------------
-# RESUMEN EJECUTIVO (CON HALLAZGOS DE ATRIBUTOS)
+# RESUMEN EJECUTIVO
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Resumen Ejecutivo**")
 
 col_res1, col_res2 = st.columns(2)
 
-# Métricas de campaña (ya calculadas antes)
 if 'antes_sales' in locals() and 'despues_sales' in locals():
     antes_mean = antes_sales.mean()
     despues_mean = despues_sales.mean()
@@ -660,20 +653,20 @@ else:
         antes_mean = despues_mean = antes_median = despues_median = cohen_d = r_pb = np.nan
 
 with col_res1:
-    st.markdown("**Puntos Clave:**")
-    st.write(f"• **Ventas totales:** ${df_filtrado['sales'].sum():,.2f}")
+    st.markdown("Puntos Clave:")
+    st.write(f"• Ventas totales: ${df_filtrado['sales'].sum():,.2f}")
     if not np.isnan(antes_mean) and not np.isnan(despues_mean):
-        st.write(f"• **Venta promedio antes:** ${antes_mean:,.2f} | después: ${despues_mean:,.2f}  →  **+{(despues_mean-antes_mean)/antes_mean*100:+.1f}%**")
-        st.write(f"• **Mediana antes:** ${antes_median:,.2f} | después: ${despues_median:,.2f}  →  **+{(despues_median-antes_median)/antes_median*100:+.1f}%**")
+        st.write(f"• Venta promedio antes: ${antes_mean:,.2f} | después: ${despues_mean:,.2f}  →  **+{(despues_mean-antes_mean)/antes_mean*100:+.1f}%**")
+        st.write(f"• Mediana antes: ${antes_median:,.2f} | después: ${despues_median:,.2f}  →  **+{(despues_median-antes_median)/antes_median*100:+.1f}%**")
     if not np.isnan(cohen_d):
-        st.write(f"• **Tamaño del efecto (d de Cohen):** {cohen_d:.3f} (pequeño)")
+        st.write(f"• Tamaño del efecto (d de Cohen): {cohen_d:.3f} (pequeño)")
     if not np.isnan(r_pb):
-        st.write(f"• **Correlación punto-biserial:** {r_pb:.3f}")
+        st.write(f"• Correlación punto-biserial: {r_pb:.3f}")
 
 with col_res2:
-    st.markdown("**Recomendaciones:**")
+    st.markdown("Recomendaciones:**")
     st.success("• La campaña tuvo un **impacto positivo y significativo** en las ventas.")
-    st.info("• El efecto es pequeño a nivel agregado, pero **muy variable entre productos**.")
+    st.info("• El efecto es pequeño a nivel agregado, pero muy variable entre productos.")
     
     # Productos con mayor crecimiento
     if 'brand_impact' in locals() and not brand_impact.empty:
@@ -681,7 +674,7 @@ with col_res2:
         top_names = top_growth.index.tolist()
         st.write(f"• **Productos con mayor crecimiento:** {top_names[0]} ({top_growth.iloc[0]:+.1f}%), {top_names[1]} ({top_growth.iloc[1]:+.1f}%).")
     
-    # Mejor línea de producto (calculada de nuevo aquí por si no se ejecutó la pestaña)
+    # Mejor línea de producto
     line_impact = df_filtrado.groupby(['Product Line', 'Campaign'])['sales'].mean().unstack()
     if 'Antes' in line_impact.columns and 'Después' in line_impact.columns:
         line_impact['pct'] = ((line_impact['Después'] - line_impact['Antes']) / line_impact['Antes']) * 100
@@ -717,3 +710,4 @@ with col_res2:
 # Pie de página
 st.markdown("---")
 st.markdown("*Última actualización: " + pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S") + "*")
+
