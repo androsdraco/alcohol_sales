@@ -159,7 +159,7 @@ with col_missing2:
 
 if crear_visualizaciones and len(resumen_faltantes[resumen_faltantes['Cantidad_Faltantes'] > 0]) > 0:
     fig, ax = plt.subplots(figsize=(10, 4))
-    sns.heatmap(df_filtrado.isnull(), cbar=False, cmap="mako", yticklabels=False, ax=ax)
+    sns.heatmap(df_filtrado.isnull(), cbar=False, cmap="YlOrBr", yticklabels=False, ax=ax)
     ax.set_title('Visualización de Patrones de Datos Faltantes')
     st.pyplot(fig)
 
@@ -578,7 +578,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE CORRELACIONES (INCLUYENDO ATRIBUTOS)
+# ANÁLISIS DE CORRELACIONES (SIN HEATMAP, CON PALETA YlOrBr)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("🔗 **Análisis de Correlaciones**")
@@ -606,7 +606,8 @@ if len(df_filtrado) > 1:
     
     with col_corr1:
         st.markdown("**Matriz de Correlación:**")
-        st.dataframe(correlation_matrix.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1), 
+        # Usar la paleta YlOrBr para el gradiente de fondo
+        st.dataframe(correlation_matrix.style.background_gradient(cmap='YlOrBr', vmin=-1, vmax=1), 
                     use_container_width=True)
     
     with col_corr2:
@@ -615,13 +616,6 @@ if len(df_filtrado) > 1:
         for variable, corr in sales_corr.items():
             if variable != 'sales':
                 st.write(f"**{variable}:** {corr:.3f}")
-    
-    if crear_visualizaciones:
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.heatmap(correlation_matrix, annot=True, fmt='.2f', cmap='coolwarm', 
-                   center=0, square=True, ax=ax)
-        ax.set_title('Mapa de Correlaciones')
-        st.pyplot(fig)
 
 # -------------------------------------------------------------------
 # RESUMEN EJECUTIVO (CON HALLAZGOS DE ATRIBUTOS)
