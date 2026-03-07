@@ -40,9 +40,9 @@ def load_data():
     df['date'] = pd.to_datetime(df['date'], dayfirst=True)
     # Eliminar duplicados (misma fecha, marca y ventas)
     df = df.drop_duplicates(subset=['date', 'brand', 'sales'])
-    # Asegurar que 'size' sea numérico (algunos valores pueden ser strings)
+    # Asegurar que 'size' sea numérico
     df['size'] = pd.to_numeric(df['size'], errors='coerce')
-    # Estandarizar presentación a minúsculas para consistencia
+    # Estandarizar presentación a minúsculas
     df['presentation'] = df['presentation'].str.lower()
     return df
 
@@ -74,9 +74,10 @@ with col1:
 
 with col2:
     st.markdown("### **Configuración de Campaña**")
+    # Fecha de campaña actualizada a 2023-08-01
     fecha_campania = st.date_input(
         "Fecha de inicio de campaña",
-        value=pd.Timestamp('2023-01-10').date(),
+        value=pd.Timestamp('2023-08-01').date(),
         min_value=min_date,
         max_value=max_date
     )
@@ -128,8 +129,8 @@ if analisis_completo:
         st.write(f"**Fechas únicas:** {df_filtrado['date'].nunique()}")
     
     with info_col3:
-        st.markdown("**Información de Marcas:**")
-        st.write(f"**Marcas (productos) únicas:** {df_filtrado['brand'].nunique()}")
+        st.markdown("**Información de Productos:**")
+        st.write(f"**Productos (marcas) únicos:** {df_filtrado['brand'].nunique()}")
         st.write(f"**Líneas de producto únicas:** {df_filtrado['Product Line'].nunique()}")
         st.write(f"**Presentaciones:** {df_filtrado['presentation'].dropna().unique()}")
 
@@ -197,6 +198,57 @@ with col_uni3:
     st.caption(f"Límites: [${lower_bound:,.2f}, ${upper_bound:,.2f}]")
 
 # -------------------------------------------------------------------
+# ANÁLISIS UNIVARIANTE DE ATRIBUTOS DE PRODUCTO
+# -------------------------------------------------------------------
+st.markdown("---")
+st.subheader("**Distribución de Atributos de Producto**")
+
+col_attr1, col_attr2, col_attr3 = st.columns(3)
+
+with col_attr1:
+    st.markdown("**Frecuencia de Líneas de Producto**")
+    line_counts = df_filtrado['Product Line'].value_counts()
+    st.dataframe(line_counts, use_container_width=True)
+
+with col_attr2:
+    st.markdown("**Frecuencia de Tamaños**")
+    size_counts = df_filtrado['size'].value_counts().sort_index()
+    st.dataframe(size_counts, use_container_width=True)
+
+with col_attr3:
+    st.markdown("**Frecuencia de Presentaciones**")
+    pres_counts = df_filtrado['presentation'].value_counts()
+    st.dataframe(pres_counts, use_container_width=True)
+
+if crear_visualizaciones:
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    
+    # Gráfico de barras para líneas de producto
+    top_lines = line_counts.head(10)
+    axes[0].bar(top_lines.index, top_lines.values, color='skyblue')
+    axes[0].set_title('Top 10 Líneas de Producto')
+    axes[0].set_xlabel('Línea')
+    axes[0].set_ylabel('Frecuencia')
+    axes[0].tick_params(axis='x', rotation=45)
+    
+    # Histograma de tamaños
+    sizes = df_filtrado['size'].dropna()
+    axes[1].hist(sizes, bins=20, color='lightgreen', edgecolor='black')
+    axes[1].set_title('Distribución de Tamaños')
+    axes[1].set_xlabel('Tamaño (unidades)')
+    axes[1].set_ylabel('Frecuencia')
+    
+    # Gráfico de barras para presentaciones
+    pres_counts.plot(kind='bar', ax=axes[2], color=['#ff9999','#66b3ff'])
+    axes[2].set_title('Distribución de Presentaciones')
+    axes[2].set_xlabel('Presentación')
+    axes[2].set_ylabel('Frecuencia')
+    axes[2].tick_params(axis='x', rotation=0)
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+
+# -------------------------------------------------------------------
 # CREACIÓN DE VARIABLES TEMPORALES Y DE CAMPAÑA
 # -------------------------------------------------------------------
 df_filtrado['month'] = df_filtrado['date'].dt.month
@@ -223,7 +275,7 @@ df_filtrado['Campaign'] = np.where(
 )
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE IMPACTO DE CAMPAÑA
+# ANÁLISIS DE IMPACTO DE CAMPAÑA (GLOBAL)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Análisis de Impacto de Campaña**")
@@ -286,7 +338,7 @@ with col_camp2:
         st.warning("No hay suficientes datos para ambos periodos de campaña")
 
 # -------------------------------------------------------------------
-# VISUALIZACIONES DE CAMPAÑA
+# VISUALIZACIONES DE CAMPAÑA (GLOBALES)
 # -------------------------------------------------------------------
 if crear_visualizaciones and len(df_filtrado) > 0:
     st.markdown("**Visualizaciones de Impacto de Campaña:**")
@@ -332,75 +384,53 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS POR ATRIBUTOS DEL PRODUCTO (usando columnas pre‑computadas)
+# ANÁLISIS BIVARIANTE: ATRIBUTOS DEL PRODUCTO VS CAMPAÑA
 # -------------------------------------------------------------------
 st.markdown("---")
-st.subheader("**Análisis por Atributos del Producto**")
+st.subheader("**Impacto de la Campaña por Atributos del Producto**")
 
-tab1, tab2, tab3 = st.tabs(["Por Línea de Producto", "Por Tamaño (Size)", "Por Presentación"])
-
-with tab1:
-    st.markdown("### Impacto de la campaña por línea de producto")
-    line_stats = df_filtrado.groupby(['Product Line', 'Campaign'])['sales'].mean().unstack()
-    if 'Antes' in line_stats.columns and 'Después' in line_stats.columns:
-        line_stats['pct_change'] = ((line_stats['Después'] - line_stats['Antes']) / line_stats['Antes']) * 100
-        line_stats = line_stats.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
-        st.dataframe(line_stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
+# Función auxiliar para mostrar tabla y gráfico de impacto por categoría
+def plot_impact_by_category(df, group_col, group_name):
+    stats = df.groupby([group_col, 'Campaign'])['sales'].mean().unstack()
+    if 'Antes' in stats.columns and 'Después' in stats.columns:
+        stats['pct_change'] = ((stats['Después'] - stats['Antes']) / stats['Antes']) * 100
+        stats = stats.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
+        st.dataframe(stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
         
         fig, ax = plt.subplots(figsize=(10, 6))
-        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in line_stats['pct_change']]
-        ax.barh(line_stats.index, line_stats['pct_change'], color=colors)
+        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in stats['pct_change']]
+        ax.barh(stats.index, stats['pct_change'], color=colors)
         ax.axvline(0, color='black', linewidth=0.8)
         ax.set_xlabel('Cambio porcentual (%)')
-        ax.set_title('Cambio en ventas promedio por línea de producto')
+        ax.set_title(f'Cambio en ventas promedio por {group_name}')
         st.pyplot(fig)
     else:
         st.info("No hay suficientes datos para ambos periodos.")
 
-with tab2:
-    st.markdown("### Impacto de la campaña por tamaño (pack size)")
-    size_stats = df_filtrado.dropna(subset=['size']).groupby(['size', 'Campaign'])['sales'].mean().unstack()
-    if 'Antes' in size_stats.columns and 'Después' in size_stats.columns:
-        size_stats['pct_change'] = ((size_stats['Después'] - size_stats['Antes']) / size_stats['Antes']) * 100
-        size_stats = size_stats.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
-        st.dataframe(size_stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
-        
-        fig, ax = plt.subplots(figsize=(10, 5))
-        sizes = size_stats.index.astype(str)
-        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in size_stats['pct_change']]
-        ax.bar(sizes, size_stats['pct_change'], color=colors)
-        ax.axhline(0, color='black', linewidth=0.8)
-        ax.set_xlabel('Tamaño (número de unidades)')
-        ax.set_ylabel('Cambio porcentual (%)')
-        ax.set_title('Cambio en ventas promedio por tamaño de paquete')
-        st.pyplot(fig)
-    else:
-        st.info("No hay suficientes datos para ambos periodos.")
+tab_attr1, tab_attr2, tab_attr3 = st.tabs(["Por Línea de Producto", "Por Tamaño (Size)", "Por Presentación"])
 
-with tab3:
-    st.markdown("### Impacto de la campaña por presentación (envase)")
-    pres_stats = df_filtrado.dropna(subset=['presentation']).groupby(['presentation', 'Campaign'])['sales'].mean().unstack()
-    if 'Antes' in pres_stats.columns and 'Después' in pres_stats.columns:
-        pres_stats['pct_change'] = ((pres_stats['Después'] - pres_stats['Antes']) / pres_stats['Antes']) * 100
-        pres_stats = pres_stats.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
-        st.dataframe(pres_stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
-        
-        fig, ax = plt.subplots(figsize=(8, 5))
-        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in pres_stats['pct_change']]
-        ax.bar(pres_stats.index, pres_stats['pct_change'], color=colors)
-        ax.axhline(0, color='black', linewidth=0.8)
-        ax.set_xlabel('Presentación')
-        ax.set_ylabel('Cambio porcentual (%)')
-        ax.set_title('Cambio en ventas promedio por presentación')
-        st.pyplot(fig)
-    else:
-        st.info("No hay suficientes datos para ambos periodos.")
+with tab_attr1:
+    st.markdown("### Impacto por línea de producto")
+    plot_impact_by_category(df_filtrado, 'Product Line', 'línea de producto')
+
+with tab_attr2:
+    st.markdown("### Impacto por tamaño")
+    # Filtrar tamaños no nulos
+    df_size = df_filtrado.dropna(subset=['size']).copy()
+    # Convertir size a string para mejor visualización en gráfico
+    df_size['size_str'] = df_size['size'].astype(int).astype(str)
+    plot_impact_by_category(df_size, 'size_str', 'tamaño (unidades)')
+
+with tab_attr3:
+    st.markdown("### Impacto por presentación")
+    df_pres = df_filtrado.dropna(subset=['presentation'])
+    plot_impact_by_category(df_pres, 'presentation', 'presentación')
 
 # -------------------------------------------------------------------
-# ANÁLISIS POR MARCA (PRODUCTO)
+# ANÁLISIS POR PRODUCTO (MARCA)
 # -------------------------------------------------------------------
 st.markdown("---")
-st.subheader("**Análisis por Producto (Marca)**")
+st.subheader("**Análisis Detallado por Producto**")
 
 marca_seleccionada = st.selectbox(
     "Seleccionar producto (marca) para análisis detallado:",
@@ -423,7 +453,6 @@ if marca_seleccionada:
     
     with col_marca2:
         st.markdown("**Atributos del Producto:**")
-        # Tomar el primer valor (todos deben ser iguales para el mismo producto)
         product_line = marca_data['Product Line'].iloc[0]
         size = marca_data['size'].iloc[0]
         presentation = marca_data['presentation'].iloc[0]
@@ -444,26 +473,12 @@ if marca_seleccionada:
         else:
             st.write("Datos insuficientes para ambos periodos")
 
-# Top productos boxplot (por volumen de ventas)
-st.markdown("**Top Productos por Ventas Totales**")
-top_n = st.slider("Número de productos a mostrar", min_value=5, max_value=15, value=7)
-top_brands = df_filtrado.groupby('brand')['sales'].sum().nlargest(top_n).index
-df_top = df_filtrado[df_filtrado['brand'].isin(top_brands)]
-
-fig, ax = plt.subplots(figsize=(10, 5))
-sns.boxplot(data=df_top, x='brand', y='sales', ax=ax)
-ax.set_title(f'Distribución de Ventas de los {top_n} Productos Más Vendidos')
-ax.set_xlabel('Producto')
-ax.set_ylabel('Ventas ($)')
-plt.xticks(rotation=45)
-st.pyplot(fig)
-
 # -------------------------------------------------------------------
-# HETEROGENEIDAD DEL IMPACTO POR PRODUCTO (MARCA)
+# HETEROGENEIDAD DEL IMPACTO POR PRODUCTO (TODOS)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Heterogeneidad del Impacto por Producto**")
-st.markdown("La campaña publicitaria puede haber afectado de manera diferente a cada producto. A continuación se muestra el cambio porcentual en las ventas promedio para cada producto (antes vs. después de la campaña).")
+st.markdown("A continuación se muestra el cambio porcentual en las ventas promedio para cada producto (antes vs. después de la campaña).")
 
 # Calcular cambio porcentual por producto (brand)
 brand_impact = df_filtrado.groupby(['brand', 'Campaign'])['sales'].mean().unstack()
@@ -563,7 +578,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS DE CORRELACIONES
+# ANÁLISIS DE CORRELACIONES (INCLUYENDO ATRIBUTOS)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("🔗 **Análisis de Correlaciones**")
@@ -576,12 +591,10 @@ if len(df_filtrado) > 1:
     df_corr['brand_code'] = df_corr['brand'].map(brand_mapping)
     df_corr['campaign_code'] = df_corr['Campaign'].map({'Antes': 0, 'Después': 1})
     
-    # Incluir atributos de producto
+    # Atributos de producto
     df_corr['size_num'] = df_corr['size']
-    # Codificar presentación: can -> 0, bottle -> 1
     pres_mapping = {'can': 0, 'bottle': 1}
     df_corr['pres_code'] = df_corr['presentation'].map(pres_mapping)
-    # Codificar línea de producto (opcional, muchas categorías)
     line_mapping = {line: i for i, line in enumerate(df_corr['Product Line'].unique())}
     df_corr['line_code'] = df_corr['Product Line'].map(line_mapping)
     
@@ -611,7 +624,7 @@ if len(df_filtrado) > 1:
         st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# RESUMEN EJECUTIVO (ACTUALIZADO CON ATRIBUTOS DE PRODUCTO)
+# RESUMEN EJECUTIVO (CON HALLAZGOS DE ATRIBUTOS)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Resumen Ejecutivo**")
@@ -666,20 +679,32 @@ with col_res2:
         top_names = top_growth.index.tolist()
         st.write(f"• **Productos con mayor crecimiento:** {top_names[0]} ({top_growth.iloc[0]:+.1f}%), {top_names[1]} ({top_growth.iloc[1]:+.1f}%).")
     
-    # Mejor línea de producto
-    if 'line_stats' in locals() and not line_stats.empty:
-        best_line = line_stats['pct_change'].idxmax()
-        st.write(f"• **Línea de producto con mejor respuesta:** {best_line} (+{line_stats.loc[best_line, 'pct_change']:.1f}%).")
+    # Mejor línea de producto (calculada de nuevo aquí por si no se ejecutó la pestaña)
+    line_impact = df_filtrado.groupby(['Product Line', 'Campaign'])['sales'].mean().unstack()
+    if 'Antes' in line_impact.columns and 'Después' in line_impact.columns:
+        line_impact['pct'] = ((line_impact['Después'] - line_impact['Antes']) / line_impact['Antes']) * 100
+        line_impact = line_impact.dropna(subset=['pct'])
+        if not line_impact.empty:
+            best_line = line_impact['pct'].idxmax()
+            st.write(f"• **Línea de producto con mejor respuesta:** {best_line} (+{line_impact.loc[best_line, 'pct']:.1f}%).")
     
     # Mejor presentación
-    if 'pres_stats' in locals() and not pres_stats.empty:
-        best_pres = pres_stats['pct_change'].idxmax()
-        st.write(f"• **Presentación con mejor respuesta:** {best_pres} (+{pres_stats.loc[best_pres, 'pct_change']:.1f}%).")
+    pres_impact = df_filtrado.dropna(subset=['presentation']).groupby(['presentation', 'Campaign'])['sales'].mean().unstack()
+    if 'Antes' in pres_impact.columns and 'Después' in pres_impact.columns:
+        pres_impact['pct'] = ((pres_impact['Después'] - pres_impact['Antes']) / pres_impact['Antes']) * 100
+        pres_impact = pres_impact.dropna(subset=['pct'])
+        if not pres_impact.empty:
+            best_pres = pres_impact['pct'].idxmax()
+            st.write(f"• **Presentación con mejor respuesta:** {best_pres} (+{pres_impact.loc[best_pres, 'pct']:.1f}%).")
     
     # Mejor tamaño
-    if 'size_stats' in locals() and not size_stats.empty:
-        best_size = size_stats['pct_change'].idxmax()
-        st.write(f"• **Tamaño con mejor respuesta:** {best_size} unidades (+{size_stats.loc[best_size, 'pct_change']:.1f}%).")
+    size_impact = df_filtrado.dropna(subset=['size']).groupby(['size', 'Campaign'])['sales'].mean().unstack()
+    if 'Antes' in size_impact.columns and 'Después' in size_impact.columns:
+        size_impact['pct'] = ((size_impact['Después'] - size_impact['Antes']) / size_impact['Antes']) * 100
+        size_impact = size_impact.dropna(subset=['pct'])
+        if not size_impact.empty:
+            best_size = size_impact['pct'].idxmax()
+            st.write(f"• **Tamaño con mejor respuesta:** {best_size} unidades (+{size_impact.loc[best_size, 'pct']:.1f}%).")
     
     # Mejor estación
     mejor_estacion = df_filtrado.groupby('estacion')['sales'].mean().idxmax()
