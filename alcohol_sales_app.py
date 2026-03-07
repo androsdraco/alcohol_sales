@@ -3,11 +3,11 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from scipy.stats import skew, kurtosis, ttest_ind, mannwhitneyu, sem, t, pointbiserialr
+from scipy.stats import skew, kurtosis, ttest_ind, mannwhitneyu, pointbiserialr
 import warnings
 warnings.filterwarnings('ignore')
 
-# Intento de importar statsmodels
+# Intento de importar statsmodels (para el test de interacción)
 try:
     import statsmodels.api as sm
     from statsmodels.formula.api import ols
@@ -26,21 +26,31 @@ st.set_page_config(
 st.title("**Análisis de Ventas de Alcohol**")
 st.markdown("---")
 
-# Cargar datos
+# -------------------------------------------------------------------
+# CARGA DE DATOS (VERSIÓN ENRIQUECIDA)
+# -------------------------------------------------------------------
 @st.cache_data
 def load_data():
-    df = pd.read_csv("CSV/Alcohol sales.csv")
-    df['sales'] = df['sales'].str.replace('$', '', regex=False)
+    df = pd.read_csv("CSV/Alcohol_sales_enriched.csv")
+    # Limpiar la columna de ventas (eliminar $ y comas)
+    df['sales'] = df['sales'].astype(str).str.replace('$', '', regex=False)
     df['sales'] = df['sales'].str.replace(',', '', regex=False)
     df['sales'] = df['sales'].astype(float)
+    # Convertir fecha
     df['date'] = pd.to_datetime(df['date'], dayfirst=True)
     # Eliminar duplicados (misma fecha, marca y ventas)
     df = df.drop_duplicates(subset=['date', 'brand', 'sales'])
+    # Asegurar que 'size' sea numérico (algunos valores pueden ser strings)
+    df['size'] = pd.to_numeric(df['size'], errors='coerce')
+    # Estandarizar presentación a minúsculas para consistencia
+    df['presentation'] = df['presentation'].str.lower()
     return df
 
 df = load_data()
 
-# Crear columnas para controles
+# -------------------------------------------------------------------
+# CONTROLES Y FILTROS
+# -------------------------------------------------------------------
 col1, col2, col3 = st.columns(3)
 
 with col1:
@@ -119,11 +129,9 @@ if analisis_completo:
     
     with info_col3:
         st.markdown("**Información de Marcas:**")
-        st.write(f"**Marcas únicas:** {df_filtrado['brand'].nunique()}")
-        st.write(f"**Marcas más vendidas:**")
-        top_brands = df_filtrado.groupby('brand')['sales'].sum().nlargest(3)
-        for brand, sales in top_brands.items():
-            st.write(f"  • {brand}: ${sales:,.2f}")
+        st.write(f"**Marcas (productos) únicas:** {df_filtrado['brand'].nunique()}")
+        st.write(f"**Líneas de producto únicas:** {df_filtrado['Product Line'].nunique()}")
+        st.write(f"**Presentaciones:** {df_filtrado['presentation'].dropna().unique()}")
 
 # Análisis de valores faltantes
 st.markdown("---")
@@ -172,7 +180,6 @@ with col_uni1:
 
 with col_uni2:
     skewness = skew(sales_data)
-    kurt = kurtosis(sales_data)
     st.metric("Asimetría (Skewness)", f"{skewness:.4f}")
     st.metric("Curtosis", f"{kurtosis(sales_data):.4f}")
     st.metric("Rango Intercuartílico (IQR)", f"${stats['75%'] - stats['25%']:,.2f}")
@@ -215,10 +222,6 @@ df_filtrado['Campaign'] = np.where(
     'Después'
 )
 
-# Variables categóricas y numéricas
-Cat_cols = ['brand', 'Campaign', 'month', 'estacion']
-Num_cols = ['sales', 'dia_semana']
-
 # -------------------------------------------------------------------
 # ANÁLISIS DE IMPACTO DE CAMPAÑA
 # -------------------------------------------------------------------
@@ -256,7 +259,7 @@ with col_camp2:
             t_stat, p_value_t = ttest_ind(despues_sales, antes_sales, equal_var=False)
             u_stat, p_value_u = mannwhitneyu(despues_sales, antes_sales, alternative='two-sided')
             
-            # Cálculo de Cohen's d (tamaño del efecto)
+            # Cálculo de Cohen's d
             n1, n2 = len(antes_sales), len(despues_sales)
             var1, var2 = antes_sales.var(), despues_sales.var()
             pooled_std = np.sqrt(((n1-1)*var1 + (n2-1)*var2) / (n1+n2-2))
@@ -272,7 +275,6 @@ with col_camp2:
             st.write(f"**d de Cohen:** {cohen_d:.3f} (interpretación: {'pequeño' if abs(cohen_d)<0.2 else 'medio' if abs(cohen_d)<0.5 else 'grande'})")
             st.write(f"**Correlación punto-biserial:** {r_pb:.3f} (p = {p_pb:.4f})")
             
-            # Usamos el p-valor del t-test para decidir éxito
             if p_value_t < 0.05:
                 if despues_mean > antes_mean:
                     st.success("✅ La campaña parece EXITOSA (diferencia significativa)")
@@ -315,7 +317,7 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     plt.tight_layout()
     st.pyplot(fig)
 
-    # Gráfico de dispersión
+    # Gráfico de dispersión temporal
     fig, ax = plt.subplots(figsize=(12, 5))
     colors = {'Antes': '#1f77b4', 'Después': '#ff7f0e'}
     for camp in ['Antes', 'Después']:
@@ -330,13 +332,78 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# ANÁLISIS POR MARCA
+# ANÁLISIS POR ATRIBUTOS DEL PRODUCTO (usando columnas pre‑computadas)
 # -------------------------------------------------------------------
 st.markdown("---")
-st.subheader("**Análisis por Marca**")
+st.subheader("**Análisis por Atributos del Producto**")
+
+tab1, tab2, tab3 = st.tabs(["Por Línea de Producto", "Por Tamaño (Size)", "Por Presentación"])
+
+with tab1:
+    st.markdown("### Impacto de la campaña por línea de producto")
+    line_stats = df_filtrado.groupby(['Product Line', 'Campaign'])['sales'].mean().unstack()
+    if 'Antes' in line_stats.columns and 'Después' in line_stats.columns:
+        line_stats['pct_change'] = ((line_stats['Después'] - line_stats['Antes']) / line_stats['Antes']) * 100
+        line_stats = line_stats.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
+        st.dataframe(line_stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in line_stats['pct_change']]
+        ax.barh(line_stats.index, line_stats['pct_change'], color=colors)
+        ax.axvline(0, color='black', linewidth=0.8)
+        ax.set_xlabel('Cambio porcentual (%)')
+        ax.set_title('Cambio en ventas promedio por línea de producto')
+        st.pyplot(fig)
+    else:
+        st.info("No hay suficientes datos para ambos periodos.")
+
+with tab2:
+    st.markdown("### Impacto de la campaña por tamaño (pack size)")
+    size_stats = df_filtrado.dropna(subset=['size']).groupby(['size', 'Campaign'])['sales'].mean().unstack()
+    if 'Antes' in size_stats.columns and 'Después' in size_stats.columns:
+        size_stats['pct_change'] = ((size_stats['Después'] - size_stats['Antes']) / size_stats['Antes']) * 100
+        size_stats = size_stats.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
+        st.dataframe(size_stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        sizes = size_stats.index.astype(str)
+        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in size_stats['pct_change']]
+        ax.bar(sizes, size_stats['pct_change'], color=colors)
+        ax.axhline(0, color='black', linewidth=0.8)
+        ax.set_xlabel('Tamaño (número de unidades)')
+        ax.set_ylabel('Cambio porcentual (%)')
+        ax.set_title('Cambio en ventas promedio por tamaño de paquete')
+        st.pyplot(fig)
+    else:
+        st.info("No hay suficientes datos para ambos periodos.")
+
+with tab3:
+    st.markdown("### Impacto de la campaña por presentación (envase)")
+    pres_stats = df_filtrado.dropna(subset=['presentation']).groupby(['presentation', 'Campaign'])['sales'].mean().unstack()
+    if 'Antes' in pres_stats.columns and 'Después' in pres_stats.columns:
+        pres_stats['pct_change'] = ((pres_stats['Después'] - pres_stats['Antes']) / pres_stats['Antes']) * 100
+        pres_stats = pres_stats.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
+        st.dataframe(pres_stats[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
+        
+        fig, ax = plt.subplots(figsize=(8, 5))
+        colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in pres_stats['pct_change']]
+        ax.bar(pres_stats.index, pres_stats['pct_change'], color=colors)
+        ax.axhline(0, color='black', linewidth=0.8)
+        ax.set_xlabel('Presentación')
+        ax.set_ylabel('Cambio porcentual (%)')
+        ax.set_title('Cambio en ventas promedio por presentación')
+        st.pyplot(fig)
+    else:
+        st.info("No hay suficientes datos para ambos periodos.")
+
+# -------------------------------------------------------------------
+# ANÁLISIS POR MARCA (PRODUCTO)
+# -------------------------------------------------------------------
+st.markdown("---")
+st.subheader("**Análisis por Producto (Marca)**")
 
 marca_seleccionada = st.selectbox(
-    "Seleccionar marca para análisis detallado:",
+    "Seleccionar producto (marca) para análisis detallado:",
     df_filtrado['brand'].unique()
 )
 
@@ -346,7 +413,7 @@ if marca_seleccionada:
     col_marca1, col_marca2, col_marca3 = st.columns(3)
     
     with col_marca1:
-        st.markdown("**Estadísticas de la Marca:**")
+        st.markdown("**Estadísticas del Producto:**")
         stats = marca_data['sales'].describe()
         st.write(f"**Conteo:** {stats['count']}")
         st.write(f"**Media:** ${stats['mean']:,.2f}")
@@ -355,14 +422,14 @@ if marca_seleccionada:
         st.write(f"**Máximo:** ${stats['max']:,.2f}")
     
     with col_marca2:
-        st.markdown("**Análisis Temporal:**")
-        st.write(f"**Primera venta:** {marca_data['date'].min().strftime('%Y-%m-%d')}")
-        st.write(f"**Última venta:** {marca_data['date'].max().strftime('%Y-%m-%d')}")
-        st.write(f"**Días con ventas:** {marca_data['date'].nunique()}")
-        
-        # Mejor mes
-        mejor_mes = marca_data.groupby('month')['sales'].sum().idxmax()
-        st.write(f"**Mejor mes:** {mejor_mes}")
+        st.markdown("**Atributos del Producto:**")
+        # Tomar el primer valor (todos deben ser iguales para el mismo producto)
+        product_line = marca_data['Product Line'].iloc[0]
+        size = marca_data['size'].iloc[0]
+        presentation = marca_data['presentation'].iloc[0]
+        st.write(f"**Línea:** {product_line}")
+        st.write(f"**Tamaño:** {size if pd.notna(size) else 'Desconocido'}")
+        st.write(f"**Presentación:** {presentation if pd.notna(presentation) else 'Desconocido'}")
     
     with col_marca3:
         st.markdown("**Impacto de Campaña:**")
@@ -377,58 +444,59 @@ if marca_seleccionada:
         else:
             st.write("Datos insuficientes para ambos periodos")
 
-# Top marcas boxplot
-st.markdown("**Top Marcas por Ventas Totales**")
-top_n = st.slider("Número de marcas a mostrar", min_value=5, max_value=15, value=7)
+# Top productos boxplot (por volumen de ventas)
+st.markdown("**Top Productos por Ventas Totales**")
+top_n = st.slider("Número de productos a mostrar", min_value=5, max_value=15, value=7)
 top_brands = df_filtrado.groupby('brand')['sales'].sum().nlargest(top_n).index
 df_top = df_filtrado[df_filtrado['brand'].isin(top_brands)]
 
 fig, ax = plt.subplots(figsize=(10, 5))
 sns.boxplot(data=df_top, x='brand', y='sales', ax=ax)
-ax.set_title(f'Distribución de Ventas de las {top_n} Marcas Más Vendidas')
-ax.set_xlabel('Marca')
+ax.set_title(f'Distribución de Ventas de los {top_n} Productos Más Vendidos')
+ax.set_xlabel('Producto')
 ax.set_ylabel('Ventas ($)')
 plt.xticks(rotation=45)
 st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# HETEROGENEIDAD DEL IMPACTO POR MARCA
+# HETEROGENEIDAD DEL IMPACTO POR PRODUCTO (MARCA)
 # -------------------------------------------------------------------
 st.markdown("---")
-st.subheader("**Heterogeneidad del Impacto por Marca**")
-st.markdown("La campaña publicitaria puede haber afectado de manera diferente a cada marca. A continuación se muestra el cambio porcentual en las ventas promedio para cada marca (antes vs. después de la campaña).")
+st.subheader("**Heterogeneidad del Impacto por Producto**")
+st.markdown("La campaña publicitaria puede haber afectado de manera diferente a cada producto. A continuación se muestra el cambio porcentual en las ventas promedio para cada producto (antes vs. después de la campaña).")
 
-# Calcular cambio porcentual por marca
+# Calcular cambio porcentual por producto (brand)
 brand_impact = df_filtrado.groupby(['brand', 'Campaign'])['sales'].mean().unstack()
 brand_impact['pct_change'] = ((brand_impact['Después'] - brand_impact['Antes']) / brand_impact['Antes']) * 100
 brand_impact = brand_impact.dropna(subset=['pct_change']).sort_values('pct_change', ascending=False)
 
-# Mostrar tabla y gráfico
 col_imp1, col_imp2 = st.columns(2)
 
 with col_imp1:
-    st.markdown("**Cambio porcentual por marca:**")
+    st.markdown("**Cambio porcentual por producto:**")
     st.dataframe(brand_impact[['Antes', 'Después', 'pct_change']].round(2), use_container_width=True)
 
 with col_imp2:
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(10, 8))
+    labels = brand_impact.index
     colors = ['#2ecc71' if x > 0 else '#e74c3c' for x in brand_impact['pct_change']]
-    ax.barh(brand_impact.index, brand_impact['pct_change'], color=colors)
+    y_pos = range(len(brand_impact))
+    ax.barh(y_pos, brand_impact['pct_change'], color=colors)
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(labels)
     ax.axvline(0, color='black', linewidth=0.8)
     ax.set_xlabel('Cambio porcentual (%)')
-    ax.set_title('Impacto de la campaña por marca')
+    ax.set_title('Impacto de la campaña por producto')
     st.pyplot(fig)
 
-# Prueba de interacción (modelo lineal con interacción)
-st.markdown("**¿Es estadísticamente significativa la diferencia en el impacto entre marcas?**")
-st.markdown("Se ajusta un modelo de regresión lineal con `sales` como variable dependiente y `brand`, `Campaign` y su interacción como predictores. El p‑valor del término de interacción indica si el efecto de la campaña varía significativamente entre marcas.")
+# Prueba de interacción (si statsmodels está disponible)
+st.markdown("**¿Es estadísticamente significativa la diferencia en el impacto entre productos?**")
+st.markdown("Se ajusta un modelo de regresión lineal con `sales` como variable dependiente y `brand`, `Campaign` y su interacción como predictores. El p‑valor del término de interacción indica si el efecto de la campaña varía significativamente entre productos.")
 
 if STATSMODELS_AVAILABLE and len(df_filtrado) > 0:
-    # Preparar datos: codificar variables categóricas
     df_model = df_filtrado.copy()
     df_model['Campaign_num'] = (df_model['Campaign'] == 'Después').astype(int)
     
-    # Usar statsmodels para OLS con interacción
     formula = 'sales ~ C(brand) * Campaign_num'
     try:
         model = ols(formula, data=df_model).fit()
@@ -437,9 +505,9 @@ if STATSMODELS_AVAILABLE and len(df_filtrado) > 0:
         
         st.write(f"**p‑valor de la interacción (brand × campaign):** {interaction_p:.4f}")
         if interaction_p < 0.05:
-            st.success("La interacción es significativa → el efecto de la campaña varía entre marcas.")
+            st.success("La interacción es significativa → el efecto de la campaña varía entre productos.")
         else:
-            st.warning("La interacción no es significativa → no hay evidencia de que el impacto difiera entre marcas.")
+            st.warning("La interacción no es significativa → no hay evidencia de que el impacto difiera entre productos.")
     except Exception as e:
         st.error("No se pudo ajustar el modelo de interacción (posiblemente debido a datos insuficientes).")
 else:
@@ -475,7 +543,6 @@ with col_est2:
 if crear_visualizaciones and len(df_filtrado) > 0:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
-    # Ventas por estación
     estacion_order = ['Invierno', 'Primavera', 'Verano', 'Otoño']
     estacion_data = df_filtrado.groupby('estacion')['sales'].sum()
     estacion_data = estacion_data.reindex(estacion_order, fill_value=0)
@@ -484,7 +551,6 @@ if crear_visualizaciones and len(df_filtrado) > 0:
     axes[0].set_ylabel('Ventas Totales ($)')
     axes[0].tick_params(axis='x', rotation=45)
     
-    # Ventas por mes
     mes_data = df_filtrado.groupby('month')['sales'].mean().sort_index()
     axes[1].plot(mes_data.index, mes_data.values, marker='o', color='#9b59b6', linewidth=2)
     axes[1].set_title('Ventas Promedio por Mes')
@@ -510,8 +576,17 @@ if len(df_filtrado) > 1:
     df_corr['brand_code'] = df_corr['brand'].map(brand_mapping)
     df_corr['campaign_code'] = df_corr['Campaign'].map({'Antes': 0, 'Después': 1})
     
-    # Seleccionar columnas numéricas
-    numeric_cols = ['sales', 'brand_code', 'campaign_code', 'month', 'dia_semana']
+    # Incluir atributos de producto
+    df_corr['size_num'] = df_corr['size']
+    # Codificar presentación: can -> 0, bottle -> 1
+    pres_mapping = {'can': 0, 'bottle': 1}
+    df_corr['pres_code'] = df_corr['presentation'].map(pres_mapping)
+    # Codificar línea de producto (opcional, muchas categorías)
+    line_mapping = {line: i for i, line in enumerate(df_corr['Product Line'].unique())}
+    df_corr['line_code'] = df_corr['Product Line'].map(line_mapping)
+    
+    numeric_cols = ['sales', 'brand_code', 'campaign_code', 'month', 'dia_semana', 
+                    'size_num', 'pres_code', 'line_code']
     correlation_matrix = df_corr[numeric_cols].corr()
     
     col_corr1, col_corr2 = st.columns(2)
@@ -522,13 +597,11 @@ if len(df_filtrado) > 1:
                     use_container_width=True)
     
     with col_corr2:
-        st.markdown("**Correlaciones con Ventas (incluye punto-biserial):**")
+        st.markdown("**Correlaciones con Ventas:**")
         sales_corr = correlation_matrix['sales'].sort_values(ascending=False)
         for variable, corr in sales_corr.items():
             if variable != 'sales':
                 st.write(f"**{variable}:** {corr:.3f}")
-                if variable == 'campaign_code':
-                    st.caption("(correlación punto-biserial entre campaña y ventas)")
     
     if crear_visualizaciones:
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -538,14 +611,14 @@ if len(df_filtrado) > 1:
         st.pyplot(fig)
 
 # -------------------------------------------------------------------
-# RESUMEN EJECUTIVO
+# RESUMEN EJECUTIVO (ACTUALIZADO CON ATRIBUTOS DE PRODUCTO)
 # -------------------------------------------------------------------
 st.markdown("---")
 st.subheader("**Resumen Ejecutivo**")
 
 col_res1, col_res2 = st.columns(2)
 
-# Para el resumen necesitamos las métricas de campaña ya calculadas
+# Métricas de campaña (ya calculadas antes)
 if 'antes_sales' in locals() and 'despues_sales' in locals():
     antes_mean = antes_sales.mean()
     despues_mean = despues_sales.mean()
@@ -559,7 +632,6 @@ if 'antes_sales' in locals() and 'despues_sales' in locals():
     all_sales = np.concatenate([antes_sales.values, despues_sales.values])
     r_pb, _ = pointbiserialr(binary, all_sales)
 else:
-    # Fallback si no se ha ejecutado el análisis de campaña
     antes_sales = df_filtrado[df_filtrado['Campaign'] == 'Antes']['sales']
     despues_sales = df_filtrado[df_filtrado['Campaign'] == 'Después']['sales']
     if len(antes_sales) > 0 and len(despues_sales) > 0:
@@ -586,25 +658,34 @@ with col_res1:
 with col_res2:
     st.markdown("**Recomendaciones:**")
     st.success("• La campaña tuvo un **impacto positivo y significativo** en las ventas.")
-    st.info("• El efecto es pequeño a nivel agregado, pero **muy variable entre marcas**.")
-    # Mostrar las marcas con mayor crecimiento (si es posible)
-    brand_growth = {}
-    for brand in df_filtrado['brand'].unique():
-        brand_data = df_filtrado[df_filtrado['brand'] == brand]
-        if 'Antes' in brand_data['Campaign'].values and 'Después' in brand_data['Campaign'].values:
-            antes_b = brand_data[brand_data['Campaign']=='Antes']['sales'].mean()
-            despues_b = brand_data[brand_data['Campaign']=='Después']['sales'].mean()
-            if antes_b > 0:
-                growth = (despues_b - antes_b) / antes_b * 100
-                brand_growth[brand] = growth
-    if brand_growth:
-        top_growth = sorted(brand_growth.items(), key=lambda x: x[1], reverse=True)[:2]
-        st.write(f"• **Marcas con mayor crecimiento:** {top_growth[0][0]} ({top_growth[0][1]:+.1f}%), {top_growth[1][0]} ({top_growth[1][1]:+.1f}%).")
+    st.info("• El efecto es pequeño a nivel agregado, pero **muy variable entre productos**.")
+    
+    # Productos con mayor crecimiento
+    if 'brand_impact' in locals() and not brand_impact.empty:
+        top_growth = brand_impact['pct_change'].nlargest(2)
+        top_names = top_growth.index.tolist()
+        st.write(f"• **Productos con mayor crecimiento:** {top_names[0]} ({top_growth.iloc[0]:+.1f}%), {top_names[1]} ({top_growth.iloc[1]:+.1f}%).")
+    
+    # Mejor línea de producto
+    if 'line_stats' in locals() and not line_stats.empty:
+        best_line = line_stats['pct_change'].idxmax()
+        st.write(f"• **Línea de producto con mejor respuesta:** {best_line} (+{line_stats.loc[best_line, 'pct_change']:.1f}%).")
+    
+    # Mejor presentación
+    if 'pres_stats' in locals() and not pres_stats.empty:
+        best_pres = pres_stats['pct_change'].idxmax()
+        st.write(f"• **Presentación con mejor respuesta:** {best_pres} (+{pres_stats.loc[best_pres, 'pct_change']:.1f}%).")
+    
+    # Mejor tamaño
+    if 'size_stats' in locals() and not size_stats.empty:
+        best_size = size_stats['pct_change'].idxmax()
+        st.write(f"• **Tamaño con mejor respuesta:** {best_size} unidades (+{size_stats.loc[best_size, 'pct_change']:.1f}%).")
+    
     # Mejor estación
     mejor_estacion = df_filtrado.groupby('estacion')['sales'].mean().idxmax()
     st.write(f"• **Enfoque estacional:** intensificar esfuerzos en {mejor_estacion}.")
-    st.write("• Se recomienda diseñar estrategias **segmentadas por marca** para optimizar futuras campañas.")
-    st.caption("Nota: Estos resultados reflejan asociaciones, no causalidad. Factores externos no controlados pueden influir en las ventas. Además, el dataset no contiene información geográfica (solo se sabe que la campaña se realizó en EE.UU.), por lo que no es posible analizar diferencias regionales.")
+    
+    st.caption("Nota: Estos resultados reflejan asociaciones, no causalidad. Factores externos no controlados pueden influir en las ventas. El dataset no contiene información geográfica, por lo que no es posible analizar diferencias regionales.")
 
 # Pie de página
 st.markdown("---")
